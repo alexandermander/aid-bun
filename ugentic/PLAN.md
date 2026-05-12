@@ -21,6 +21,27 @@ Use `uagent/UagentPrintTcpExPkg` when the task is one of these:
 - wire a new test app into the EDK2 build through `.inf` and `.dsc`
 - build, deploy, and run a test EFI through the existing `userve` service
 
+## Operator And Agent Runtime Split
+
+The `userve` tooling is now split into two binaries:
+
+- `userve/bin/userver`
+- `userve/bin/ucli`
+
+Important runtime rule:
+
+- the human operator starts and owns `userver`
+- the coding agent must not start, restart, or manage `userver`
+- the coding agent should assume `userver` is already running when deploy/run work is requested
+- the coding agent should use `ucli` to interact with the already-running `userver`
+
+The agent-side control path is:
+
+1. build or update the EFI app
+2. upload the built `.efi` with `ucli push`
+3. ask the target to execute it with `ucli run`
+4. inspect server-visible output with `ucli outputs` or `ucli status` when needed
+
 ## What The Agent Must Not Do
 
 - do not change the `Uagent` packet format here
@@ -29,6 +50,7 @@ Use `uagent/UagentPrintTcpExPkg` when the task is one of these:
 - do not replace the `UAGENT_DEBUG_PROTOCOL` path with raw TCP code in this package
 - do not change GUIDs unless the owning protocol definition changes intentionally
 - do not create a custom uploader or runner when `userve` already provides `push` and `run`
+- do not start `userver` as part of task execution unless the user explicitly asks for that
 
 ## Dependency Contract
 
@@ -187,13 +209,13 @@ It should link these library classes unless the module has a clear reason not to
 The package `.dsc` must:
 
 - define a valid EDK2 platform
-- include `MdePkg/MdePkg.dec`
-- provide the standard UEFI library implementations needed by the `.inf`
-- list each EFI app under `[Components]`
+- include `MdePkg/MdePkg.dec
+- provide the standard UEFI library implementations needed by the .inf
+- list each EFI app under [Components]
 
 If a new module is added and not listed in `[Components]`, the build will not include it.
 
-## Build And Environment
+# Build And Environment
 
 This repo is not the EDK2 workspace root.
 
@@ -221,6 +243,34 @@ source edksetup.sh
 ```
 
 There is no repo-local helper script that should be relied on here.
+
+## `userve` Control Tooling
+
+The `ucli` binary for agent use is located at:
+
+- `/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve/bin/ucli`
+
+The source for that tool is located at:
+
+- `/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve/cmd/ucli/main.go`
+
+Typical commands:
+
+```sh
+/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve/bin/ucli status
+/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve/bin/ucli push /absolute/path/to/App.efi
+/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve/bin/ucli run
+/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve/bin/ucli outputs
+```
+
+Notes for agents:
+
+- `ucli push` accepts a path to a local file and uploads the basename to the remote side
+- `ucli run` triggers execution of the selected app on the connected target
+- `ucli send "<text>"` exists for raw text commands, but normal EFI app deploy/run work should use `push` and `run`
+- `ucli outputs` is the quickest way to inspect server-visible output after a run
+- if `ucli status` reports `connected=false`, the target is not connected and deployment cannot proceed
+- if `ucli` returns an error about no connected system, stop and report that state instead of inventing a fallback transport
 
 The correct build pattern is to set `PACKAGES_PATH` inline for the build command:
 
@@ -253,6 +303,21 @@ Expected output locations:
 - `uagent/builds/UagentDebugTestPkg/DEBUG_GCC5/X64/UagentDebugTest.efi`
 - `uagent/builds/UagentPkg/DEBUG_GCC5/X64/Uagent.efi`
 
+## Deploy And Run Recipe
+
+After building an EFI app, the expected deploy/run flow is:
+
+```sh
+/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve/bin/ucli push \
+  /home/alexa/Documents/SanderStuff/AID-BUN/ugentic/uagent/builds/UagentDebugTestPkg/DEBUG_GCC5/X64/UagentDebugTest.efi
+
+/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve/bin/ucli run
+
+/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve/bin/ucli outputs
+```
+
+Use the matching built `.efi` path for whatever module was requested.
+
 Important detail:
 
 - these packages are configured to write build products into the shared `uagent/builds/` directory, not into EDK2's default `Build/` folder
@@ -283,26 +348,27 @@ make
 That produces:
 
 - `/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve/bin/userver`
+- `/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve/bin/ucli`
 
-Run it with:
+The human operator is responsible for starting `userver`.
+
+If the user explicitly asks how the operator should run it, the command is:
 
 ```sh
 cd /home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve
 ./bin/userver
 ```
 
-`userve` is an interactive shell server. It is not the older multi-process control tool described elsewhere.
+Agents must not rely on an interactive `userve>` prompt. That shell no longer exists.
 
-Once it is running, use these interactive commands inside the `userve>` prompt:
+For agent-controlled deployment and execution, use:
 
-- `status`
-- `apps`
-- `push /full/path/to/file.efi`
-- `run`
-- `echo test`
-- `disconnect`
-- `help`
-- `exit`
+- `/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve/bin/ucli status`
+- `/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve/bin/ucli push /full/path/to/file.efi`
+- `/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve/bin/ucli run`
+- `/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve/bin/ucli outputs`
+- `/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve/bin/ucli send "text"`
+- `/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve/bin/ucli disconnect`
 
 Do not invent a second uploader or control path when `userve` already supports `push` and `run`.
 
@@ -312,36 +378,32 @@ Do not stop at "the EFI built successfully" or "the local console printed succes
 
 From `/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve`, the standard remote deployment flow is:
 
-1. Start the server:
-
-```sh
-./bin/userver
-```
+1. Assume the operator already started `./bin/userver`.
 
 2. Wait for the remote `Uagent` client to connect. The server will print:
 
 - `System connected from ...`
 - `Session ready: ...`
 
-3. At the `userve>` prompt, push the built EFI:
+3. Push the built EFI with `ucli`:
 
-`push /full/path/to/<ModuleName>.efi`
+`./bin/ucli push /full/path/to/<ModuleName>.efi`
 
 4. Execute the uploaded EFI:
 
-`run`
+`./bin/ucli run`
 
-5. Watch for remote output lines printed by the server:
+5. Inspect remote output with:
 
-- `[OUTPUT] ...`
+`./bin/ucli outputs`
 
 Important behavioral rules:
 
 - this `userve` implementation supports one active session, not a multi-target selector
 - `push` sends the file basename to the remote side, so the `.efi` filename matters
 - `run` executes the currently uploaded EFI on the active remote connection
-- `echo <text>` sends ASCII text to the remote client
-- remote text from EFI arrives as `[OUTPUT] ...` lines in the interactive server
+- `ucli send "<text>"` sends ASCII text to the remote client
+- remote text from EFI is available through `ucli outputs` and is also printed by `userver`
 - if the task is to send text to the server, the agent should expect to see a distinctive remote marker line during `run`
 - if no distinctive remote marker exists in the EFI code yet, the agent should add one
 
@@ -352,7 +414,7 @@ The expected remote text path is:
 1. the EFI app calls `SendDebugMessage()`
 2. `UagentPkg` converts that into `TcpOutputText`
 3. for `TcpConnectSession` and `TcpOutputText`, `UagentPkg` sends the text payload as raw `CHAR16` bytes
-4. `userve` decodes the payload and exposes it through live `[OUTPUT] ...` lines
+4. `userve` decodes the payload and exposes it through `ucli outputs` and the running `userver` log
 
 This means:
 
@@ -363,9 +425,9 @@ This means:
 If the user asks the agent to "deploy the EFI", "send it to the server", "run it remotely", or "test it through Uagent", the agent should assume the correct path is:
 
 1. build the `.efi`
-2. start `./bin/userver`
-3. use `push /full/path/to/file.efi`
-4. use `run`
+2. assume `./bin/userver` is already running
+3. use `./bin/ucli push /full/path/to/file.efi`
+4. use `./bin/ucli run`
 5. verify that remote output contains the expected distinctive `SendDebugMessage()` text
 
 If the task is specifically about proving that output reached the server, the EFI should emit:

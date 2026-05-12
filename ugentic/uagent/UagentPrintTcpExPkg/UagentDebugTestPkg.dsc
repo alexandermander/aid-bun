@@ -28,3 +28,4 @@
 
 [Components]
   UagentPrintTcpExPkg/UagentDebugTest.inf
+  UagentPrintTcpExPkg/UagentPrintGuis.inf

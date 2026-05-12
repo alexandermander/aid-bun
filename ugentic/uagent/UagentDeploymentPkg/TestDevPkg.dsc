@@ -9,7 +9,7 @@
 
 [Packages]
   MdePkg/MdePkg.dec
-  TestDevPkg.dec
+  UagentDeploymentPkg/TestDevPkg.dec
 
 [LibraryClasses]
   BaseLib|MdePkg/Library/BaseLib/BaseLib.inf
@@ -27,4 +27,5 @@
   UefiRuntimeServicesTableLib|MdePkg/Library/UefiRuntimeServicesTableLib/UefiRuntimeServicesTableLib.inf
 
 [Components]
-  HelloWorld/HelloWorld.inf
+  UagentDeploymentPkg/HelloWorld/HelloWorld.inf
+  UagentDeploymentPkg/UagentListProtocols/UagentListProtocols.inf

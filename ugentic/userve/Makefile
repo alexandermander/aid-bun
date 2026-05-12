@@ -1,10 +1,21 @@
-BINS := $(filter-out %_test.go,$(notdir $(wildcard cmd/*)))
+CMDS := $(notdir $(wildcard cmd/*))
+BINS := $(addprefix bin/,$(CMDS))
 
 all: build
 build: $(BINS)
 
-.PHONY: $(addprefix bin/,$(BINS))
-$(addprefix bin/,$(BINS)):
+.PHONY: all build clean test $(CMDS)
+
+$(BINS): | bin
 	go build -buildmode=pie -trimpath -o $@ ./cmd/$(@F)
 
-$(BINS): $(addprefix bin/,$(BINS))
+bin:
+	mkdir -p bin
+
+$(CMDS): %: bin/%
+
+test:
+	go test ./...
+
+clean:
+	rm -f $(BINS)

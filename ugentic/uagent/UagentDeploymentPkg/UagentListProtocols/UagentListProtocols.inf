@@ -1,0 +1,45 @@
+[Defines]
+  INF_VERSION                    = 0x00010005
+  BASE_NAME                      = UagentListProtocols
+  FILE_GUID                      = B7E8E9D1-2345-4B58-97B5-E0A768C33710
+  MODULE_TYPE                    = UEFI_APPLICATION
+  VERSION_STRING                 = 1.0
+  ENTRY_POINT                    = UefiMain
+
+[Sources]
+  UagentListProtocols.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+
+[LibraryClasses]
+  UefiApplicationEntryPoint
+  UefiBootServicesTableLib
+  UefiLib
+  PrintLib
+  MemoryAllocationLib
+  BaseLib
+  BaseMemoryLib
+
+[Protocols]
+  gEfiLoadedImageProtocolGuid
+  gEfiPxeBaseCodeProtocolGuid
+  gEfiTcp4ProtocolGuid
+  gEfiTcp4ServiceBindingProtocolGuid
+  gEfiSimpleFileSystemProtocolGuid
+  gEfiDevicePathProtocolGuid
+  gEfiBlockIoProtocolGuid
+  gEfiGraphicsOutputProtocolGuid
+  gEfiSimpleTextInProtocolGuid
+  gEfiSimpleTextOutProtocolGuid
+  gEfiSimpleNetworkProtocolGuid
+  gEfiIp4ProtocolGuid
+  gEfiIp4ServiceBindingProtocolGuid
+  gEfiArpProtocolGuid
+  gEfiArpServiceBindingProtocolGuid
+  gEfiDhcp4ProtocolGuid
+  gEfiDhcp4ServiceBindingProtocolGuid
+  gEfiUdp4ProtocolGuid
+  gEfiUdp4ServiceBindingProtocolGuid
+  gEfiMtftp4ProtocolGuid
+  gEfiMtftp4ServiceBindingProtocolGuid

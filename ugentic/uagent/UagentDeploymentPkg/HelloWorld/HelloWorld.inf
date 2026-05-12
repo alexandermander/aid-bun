@@ -14,5 +14,5 @@
 
 [LibraryClasses]
   UefiApplicationEntryPoint
+  UefiBootServicesTableLib
   UefiLib
-

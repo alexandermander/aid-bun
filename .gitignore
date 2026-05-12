@@ -1,11 +1,12 @@
 # Python-generated files
 __pycache__/
 *.py[oc]
+*.efi
 build/
 dist/
 wheels/
 *.egg-info
 work/
-/ugentic/uagent/builds/
+ugentic/uagent/builds/
 # Virtual environments
 .venv
