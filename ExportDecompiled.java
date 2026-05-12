@@ -23,7 +23,7 @@ public class ExportDecompiled extends GhidraScript {
             printerr("Please provide an output path as a script argument.");
             return;
         }
-        
+
         String outputPath = args[0];
         File outFile = new File(outputPath);
         File jsonFile = deriveJsonFile(outFile);
@@ -43,10 +43,10 @@ public class ExportDecompiled extends GhidraScript {
 
             while (iter.hasNext() && !monitor.isCancelled()) {
                 Function f = iter.next();
-                
+
                 // Decompile each function (30-second timeout per function)
                 DecompileResults results = decomp.decompileFunction(f, 300, monitor);
-                
+
                 if (results != null && results.decompileCompleted()) {
                     writer.println("/* Function: " + f.getName() + " at " + f.getEntryPoint() + " */");
                     writer.println(results.getDecompiledFunction().getC());
