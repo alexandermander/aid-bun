@@ -1,0 +1,6 @@
+[Defines]
+  DEC_SPECIFICATION              = 0x0001001A
+  PACKAGE_NAME                   = TestDevPkg
+  PACKAGE_GUID                   = 91E9F3B0-5C6D-468A-B7DD-FD48E0D34A0A
+  PACKAGE_VERSION                = 0.1
+
