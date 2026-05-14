@@ -10,6 +10,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from uanalyze.collect_pe import collect_pe_files
+from uanalyze.decompile import DecompileResult
 from uanalyze.decompile import decompile_pe_files
 from uanalyze.extract import extract_uefi_image
 
@@ -32,6 +33,15 @@ def _stage_input_image(image_path: Path, staging_dir: Path) -> Path:
 
     shutil.copy2(image_path, staged_path)
     return staged_path
+
+
+def _print_decompile_progress(completed: int, total: int, result: DecompileResult) -> None:
+    percent = (completed / total) * 100
+    status = "OK" if result.return_code == 0 else f"FAIL({result.return_code})"
+    print(
+        f"[{completed}/{total} {percent:5.1f}%] "
+        f"{status} {result.input_file.name} ({result.elapsed_seconds:.1f}s)"
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -172,12 +182,11 @@ def main(argv: list[str] | None = None) -> int:
         ghidra_headless,
         [repo_root, uefi_scripts],
         jobs=args.jobs,
+        progress_callback=_print_decompile_progress,
     )
 
     failures = 0
-    for result in sorted(results, key=lambda item: item.input_file.name):
-        status = "OK" if result.return_code == 0 else f"FAIL({result.return_code})"
-        print(f"{status} {result.input_file.name} ({result.elapsed_seconds:.1f}s)")
+    for result in results:
         if result.return_code != 0:
             failures += 1
 

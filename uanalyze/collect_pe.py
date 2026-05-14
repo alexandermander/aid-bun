@@ -14,7 +14,7 @@ class CollectedPeFile:
 
 
 def is_pe32(path: Path) -> bool:
-    """Use the system file command to detect EFI PE32 payloads."""
+    """Use the system file command to detect EFI PE payloads."""
     try:
         result = subprocess.run(
             ["file", "-b", str(path)],
@@ -28,7 +28,8 @@ def is_pe32(path: Path) -> bool:
     if result.returncode != 0:
         return False
 
-    return "PE32 executable for EFI" in result.stdout
+    description = result.stdout.strip()
+    return "PE32" in description and "EFI" in description
 
 
 def collect_pe_files(

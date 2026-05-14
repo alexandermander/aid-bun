@@ -1,21 +1,13 @@
-# Ignore everything
-*
-
-# Explicitly tell git what we actually want to track
-!/.gitignore
-!README.md
-!Makefile
-!.python-version
-!*.sh
-!*.java
-!*.py
-!*.c
-!*.h
-!*.dec
-!*.dsc
-!*.inf
-!*.go
-!go.mod
-!go.sum
-!*.md
-!*/
+# Python-generated files
+__pycache__/
+*.py[oc]
+*.efi
+build/
+dist/
+wheels/
+*.egg-info
+work/
+ugentic/uagent/builds/
+# Virtual environments
+.venv
+ugentic/userve/bin/

@@ -7,6 +7,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 
 @dataclass(frozen=True)
@@ -25,6 +26,7 @@ def decompile_pe_files(
     script_roots: list[Path],
     *,
     jobs: int,
+    progress_callback: Callable[[int, int, DecompileResult], None] | None = None,
 ) -> list[DecompileResult]:
     if not pe_files:
         return []
@@ -40,6 +42,7 @@ def decompile_pe_files(
     out_root.mkdir(parents=True, exist_ok=True)
     project_root.mkdir(parents=True, exist_ok=True)
 
+    results: list[DecompileResult] = []
     with ThreadPoolExecutor(max_workers=max(1, jobs)) as executor:
         futures = [
             executor.submit(
@@ -52,7 +55,13 @@ def decompile_pe_files(
             )
             for pe_file in pe_files
         ]
-        return [future.result() for future in as_completed(futures)]
+        total = len(futures)
+        for completed, future in enumerate(as_completed(futures), start=1):
+            result = future.result()
+            results.append(result)
+            if progress_callback is not None:
+                progress_callback(completed, total, result)
+        return results
 
 
 def _run_one(
@@ -69,7 +78,7 @@ def _run_one(
     copied_input = out_dir / "main.efi"
     shutil.copy2(pe_file, copied_input)
     decompiled_output = out_dir / "decompiled_main.c"
-    script_path = os.pathsep.join(str(path.resolve()) for path in script_roots)
+    script_path = ";".join(str(path.resolve()) for path in script_roots)
     project_name = f"efi_analysis_{name}_{int(time.time() * 1000)}_{os.getpid()}"
 
     command = [
@@ -119,4 +128,3 @@ def _derive_name(path: Path) -> str:
     if stem.endswith("_body"):
         return stem[:-5]
     return stem
-
