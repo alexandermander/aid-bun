@@ -21,7 +21,7 @@ get_java_major() {
   fi
 
   version_line="$("${binary}" -version 2>&1 | head -n 1)"
-  version_token="$(printf '%s\n' "${version_line}" | sed -E 's/.*version "([^"]+)".*/\1/')"
+  version_token="$(printf '%s\n' "${version_line}" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)"
   major="$(printf '%s\n' "${version_token}" | sed -E 's/^([0-9]+).*/\1/')"
 
   if [[ -z "${major}" ]]; then
