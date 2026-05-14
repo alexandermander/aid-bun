@@ -49,6 +49,16 @@ ensure_jdk() {
   return 1
 }
 
+ensure_uefiextract() {
+  if ! have_command uefiextract; then
+    echo "Missing required tool: uefiextract"
+    echo "Add uefiextract, ensure it is on PATH, then re-run this script."
+    return 1
+  fi
+
+  echo "Found uefiextract."
+}
+
 clone_or_update_repo() {
   local repo_url="$1"
   local target_dir="$2"
@@ -64,6 +74,7 @@ clone_or_update_repo() {
 }
 
 ensure_jdk
+ensure_uefiextract
 
 if [[ ! -d "${OPT_DIR}" ]]; then
   echo "${OPT_DIR} does not exist."

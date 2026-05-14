@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -18,6 +19,19 @@ def _default_paths(repo_root: Path) -> tuple[Path, Path]:
         Path("/opt/ghidra/support/analyzeHeadless"),
         Path("/opt/ghidra-firmware-utils/ghidra_scripts"),
     )
+
+
+def _stage_input_image(image_path: Path, staging_dir: Path) -> Path:
+    staging_dir.mkdir(parents=True, exist_ok=True)
+    staged_path = staging_dir / image_path.name
+
+    if staged_path.exists():
+        if staged_path.samefile(image_path):
+            return staged_path
+        staged_path.unlink()
+
+    shutil.copy2(image_path, staged_path)
+    return staged_path
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -101,6 +115,7 @@ def main(argv: list[str] | None = None) -> int:
     default_ghidra_headless, default_uefi_scripts = _default_paths(repo_root)
     image_path = Path(args.image).resolve()
     work_dir = (repo_root / args.work_dir).resolve()
+    input_dir = work_dir / "input"
     extracted_dir = work_dir / args.extracted_dir
     pe_dir = work_dir / args.pe_dir
     decompile_dir = work_dir / args.decompile_dir
@@ -110,8 +125,10 @@ def main(argv: list[str] | None = None) -> int:
     if not export_script.is_file():
         raise FileNotFoundError(f"Missing ExportDecompiled.java at {export_script}")
 
+    staged_image_path = _stage_input_image(image_path, input_dir)
+
     print(f"[1/3] Extracting firmware into {extracted_dir}")
-    extract_uefi_image(image_path, extracted_dir, args.uefiextract)
+    extract_uefi_image(staged_image_path, extracted_dir, args.uefiextract)
 
     print(f"[2/3] Collecting PE files into {pe_dir}")
     collected = collect_pe_files(
