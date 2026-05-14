@@ -8,5 +8,6 @@ wheels/
 *.egg-info
 work/
 ugentic/uagent/builds/
+opt/
 # Virtual environments
 .venv

@@ -13,7 +13,17 @@ from uanalyze.decompile import decompile_pe_files
 from uanalyze.extract import extract_uefi_image
 
 
+def _default_paths(repo_root: Path) -> tuple[Path, Path]:
+    return (
+        repo_root / "opt" / "ghidra" / "support" / "analyzeHeadless",
+        repo_root / "opt" / "ghidra-firmware-utils" / "ghidra_scripts",
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
+    repo_root = Path(__file__).resolve().parent.parent
+    default_ghidra_headless, default_uefi_scripts = _default_paths(repo_root)
+
     parser = argparse.ArgumentParser(
         description="Extract a UEFI image, collect PE payloads, and decompile them with Ghidra."
     )
@@ -50,11 +60,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--ghidra-headless",
-        help="Path to Ghidra's analyzeHeadless launcher. Required unless --skip-decompile is used.",
+        default=str(default_ghidra_headless),
+        help=(
+            "Path to Ghidra's analyzeHeadless launcher. "
+            f"Default: %(default)s"
+        ),
     )
     parser.add_argument(
         "--uefi-scripts",
-        help="Path to the ghidra-firmware-utils ghidra_scripts directory.",
+        default=str(default_uefi_scripts),
+        help=(
+            "Path to the ghidra-firmware-utils ghidra_scripts directory. "
+            f"Default: %(default)s"
+        ),
     )
     parser.add_argument(
         "--jobs",
@@ -80,6 +98,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     repo_root = Path(__file__).resolve().parent.parent
+    default_ghidra_headless, default_uefi_scripts = _default_paths(repo_root)
     image_path = Path(args.image).resolve()
     work_dir = (repo_root / args.work_dir).resolve()
     extracted_dir = work_dir / args.extracted_dir
@@ -109,18 +128,32 @@ def main(argv: list[str] | None = None) -> int:
         print("Skipping decompilation.")
         return 0
 
-    if not args.ghidra_headless or not args.uefi_scripts:
-        raise ValueError(
-            "--ghidra-headless and --uefi-scripts are required unless --skip-decompile is used."
-        )
+    ghidra_headless = Path(args.ghidra_headless).resolve()
+    uefi_scripts = Path(args.uefi_scripts).resolve()
+
+    if not ghidra_headless.is_file():
+        if ghidra_headless == default_ghidra_headless.resolve():
+            raise FileNotFoundError(
+                "Default Ghidra headless launcher not found. "
+                "Run ./setup_ghidra.sh or pass --ghidra-headless explicitly."
+            )
+        raise FileNotFoundError(f"Ghidra headless launcher not found: {ghidra_headless}")
+
+    if not uefi_scripts.is_dir():
+        if uefi_scripts == default_uefi_scripts.resolve():
+            raise FileNotFoundError(
+                "Default ghidra-firmware-utils script directory not found. "
+                "Run ./setup_ghidra.sh or pass --uefi-scripts explicitly."
+            )
+        raise FileNotFoundError(f"Ghidra script path not found: {uefi_scripts}")
 
     print(f"[3/3] Decompiling PE files into {decompile_dir}")
     results = decompile_pe_files(
         [item.copied_to for item in collected],
         decompile_dir,
         project_dir,
-        Path(args.ghidra_headless),
-        [repo_root, Path(args.uefi_scripts)],
+        ghidra_headless,
+        [repo_root, uefi_scripts],
         jobs=args.jobs,
     )
 
