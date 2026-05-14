@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -13,26 +14,21 @@ class CollectedPeFile:
 
 
 def is_pe32(path: Path) -> bool:
-    """Lightweight PE signature check without external tools."""
+    """Use the system file command to detect EFI PE32 payloads."""
     try:
-        with path.open("rb") as handle:
-            if handle.read(2) != b"MZ":
-                return False
-            handle.seek(0x3C)
-            pe_offset_bytes = handle.read(4)
-            if len(pe_offset_bytes) != 4:
-                return False
-            pe_offset = int.from_bytes(pe_offset_bytes, "little")
-            handle.seek(pe_offset)
-            if handle.read(4) != b"PE\x00\x00":
-                return False
-            machine_bytes = handle.read(2)
-            if len(machine_bytes) != 2:
-                return False
-            machine = int.from_bytes(machine_bytes, "little")
-            return machine in {0x014C, 0x8664, 0x0200, 0xAA64}
+        result = subprocess.run(
+            ["file", "-b", str(path)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
     except OSError:
         return False
+
+    if result.returncode != 0:
+        return False
+
+    return "PE32 executable for EFI" in result.stdout
 
 
 def collect_pe_files(
@@ -80,4 +76,3 @@ def _dedupe_path(path: Path) -> Path:
         if not candidate.exists():
             return candidate
         index += 1
-
