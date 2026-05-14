@@ -15,8 +15,8 @@ from uanalyze.extract import extract_uefi_image
 
 def _default_paths(repo_root: Path) -> tuple[Path, Path]:
     return (
-        repo_root / "opt" / "ghidra" / "support" / "analyzeHeadless",
-        repo_root / "opt" / "ghidra-firmware-utils" / "ghidra_scripts",
+        Path("/opt/ghidra/support/analyzeHeadless"),
+        Path("/opt/ghidra-firmware-utils/ghidra_scripts"),
     )
 
 

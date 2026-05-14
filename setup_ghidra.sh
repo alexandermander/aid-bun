@@ -2,11 +2,8 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OPT_DIR="${SCRIPT_DIR}/opt"
+OPT_DIR="/opt"
 REQUIRED_JAVA_MAJOR=21
-
-mkdir -p "${OPT_DIR}"
 
 have_command() {
   command -v "$1" >/dev/null 2>&1
@@ -67,6 +64,18 @@ clone_or_update_repo() {
 }
 
 ensure_jdk
+
+if [[ ! -d "${OPT_DIR}" ]]; then
+  echo "${OPT_DIR} does not exist."
+  echo "Create it first or run this script with permissions that can write to ${OPT_DIR}."
+  exit 1
+fi
+
+if [[ ! -w "${OPT_DIR}" ]]; then
+  echo "${OPT_DIR} is not writable by the current user."
+  echo "Run this script with permissions that can write to ${OPT_DIR}."
+  exit 1
+fi
 
 clone_or_update_repo "https://github.com/NationalSecurityAgency/ghidra.git" \
   "${OPT_DIR}/ghidra"
