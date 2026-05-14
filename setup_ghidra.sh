@@ -5,6 +5,11 @@ set -euo pipefail
 OPT_DIR="/opt"
 REQUIRED_JAVA_MAJOR=21
 
+[[ $EUID -eq 0 ]] || {
+	echo "Please run with root permissions"
+	exit 1
+}
+
 have_command() {
   command -v "$1" >/dev/null 2>&1
 }
@@ -78,7 +83,7 @@ ensure_uefiextract
 
 if [[ ! -d "${OPT_DIR}" ]]; then
   echo "${OPT_DIR} does not exist."
-  echo "Create it first or run this script with permissions that can write to ${OPT_DIR}."
+  echo "Create it first."
   exit 1
 fi
 
