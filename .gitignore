@@ -15,5 +15,7 @@
 !*.dsc
 !*.inf
 !*.go
+!go.mod
+!go.sum
 !*.md
 !*/
