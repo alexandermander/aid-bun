@@ -1,0 +1,22 @@
+[Defines]
+  INF_VERSION                    = 0x00010005
+  BASE_NAME                      = UagentDumpNvramVars
+  FILE_GUID                      = 3B15F0BF-783B-4E48-BE75-0EA86E36C794
+  MODULE_TYPE                    = UEFI_APPLICATION
+  VERSION_STRING                 = 1.0
+  ENTRY_POINT                    = UefiMain
+
+[Sources]
+  UagentDumpNvramVars.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+
+[LibraryClasses]
+  BaseMemoryLib
+  MemoryAllocationLib
+  PrintLib
+  UefiApplicationEntryPoint
+  UefiBootServicesTableLib
+  UefiLib
+  UefiRuntimeServicesTableLib

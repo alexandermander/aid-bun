@@ -1,15 +1,16 @@
 [Defines]
-  PLATFORM_NAME                  = TestDevPkg
+  PLATFORM_NAME                  = UagentDeploymentPkg
   PLATFORM_GUID                  = 5FF64C95-EB25-4E81-8262-24FC3C6E8EBE
-  PLATFORM_VERSION               = 0.1
+  PLATFORM_VERSION               = 1.0
   DSC_SPECIFICATION              = 0x00010005
-  OUTPUT_DIRECTORY               = /home/alexa/Documents/SanderStuff/AID-BUN/ugentic/uagent/UagentDeploymentPkg/Build/TestDevPkg
+  OUTPUT_DIRECTORY               = /home/alexa/Documents/SanderStuff/AID-BUN/ugentic/uagent/builds/UagentDeploymentPkg
   SUPPORTED_ARCHITECTURES        = X64
   BUILD_TARGETS                  = DEBUG|RELEASE
+  SKUID_IDENTIFIER               = DEFAULT
 
 [Packages]
   MdePkg/MdePkg.dec
-  UagentDeploymentPkg/TestDevPkg.dec
+  UagentDeploymentPkg/UagentDeploymentPkg.dec
 
 [LibraryClasses]
   BaseLib|MdePkg/Library/BaseLib/BaseLib.inf
@@ -27,5 +28,4 @@
   UefiRuntimeServicesTableLib|MdePkg/Library/UefiRuntimeServicesTableLib/UefiRuntimeServicesTableLib.inf
 
 [Components]
-  UagentDeploymentPkg/HelloWorld/HelloWorld.inf
-  UagentDeploymentPkg/UagentListProtocols/UagentListProtocols.inf
+  UagentDeploymentPkg/UagentDumpNvramVars/UagentDumpNvramVars.inf
