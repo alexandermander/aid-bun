@@ -4,6 +4,11 @@ set -euo pipefail
 
 OPT_DIR="/opt"
 REQUIRED_JAVA_MAJOR=21
+GHIDRA_VERSION=12.0
+GHIDRA_DATE=20251205
+GHIDRA_FIRM_VERSION=12.0
+GHIDRA_FIRM_DATE=20260114
+GHIDRA_FIRM_DATE_LONG=2026.01.14
 
 [[ $EUID -eq 0 ]] || {
 	echo "Please run with root permissions"
@@ -64,38 +69,44 @@ ensure_uefiextract() {
   echo "Found uefiextract."
 }
 
-clone_or_update_repo() {
-  local repo_url="$1"
-  local target_dir="$2"
-
-  if [[ -d "${target_dir}/.git" ]]; then
-    echo "$(basename "${target_dir}") already exists in ${target_dir}"
-    echo "Updating repository..."
-    git -C "${target_dir}" pull --ff-only
-  else
-    echo "Cloning $(basename "${target_dir}") into ${target_dir}..."
-    git clone "${repo_url}" "${target_dir}"
-  fi
-}
-
 ensure_jdk
 ensure_uefiextract
 
-if [[ ! -d "${OPT_DIR}" ]]; then
-  echo "${OPT_DIR} does not exist."
-  echo "Create it first."
-  exit 1
+GHIDRA_DIR="${OPT_DIR}/ghidra"
+if [[ -d ${GHIDRA_DIR} ]]; then
+	rm -rf "${GHIDRA_DIR}"/*
+else
+	mkdir -p "${GHIDRA_DIR}" || exit 1
 fi
 
-if [[ ! -w "${OPT_DIR}" ]]; then
-  echo "${OPT_DIR} is not writable by the current user."
-  echo "Run this script with permissions that can write to ${OPT_DIR}."
-  exit 1
-fi
+GHIDRA_TEMP_ARCHIVE="$(mktemp --suffix=".zip")" || exit 1
+GHIDRA_TEMP_EXTRACT="$(mktemp -d)" || exit 1
+GHIDRA_FIRM_TEMP_ARCHIVE="$(mktemp --suffix=".zip")" || exit 1
+GHIDRA_FIRM_TEMP_EXTRACT="$(mktemp -d)" || exit 1
 
-clone_or_update_repo "https://github.com/NationalSecurityAgency/ghidra.git" \
-  "${OPT_DIR}/ghidra"
-clone_or_update_repo "https://github.com/al3xtjames/ghidra-firmware-utils.git" \
-  "${OPT_DIR}/ghidra-firmware-utils"
+trap 'cleanup_ghidra' EXIT SIGINT SIGTERM
 
-echo "Done. dependencies are available in ${OPT_DIR}"
+cleanup_ghidra() {
+	rm -f "${GHIDRA_TEMP_ARCHIVE}"
+	rm -rf "${GHIDRA_TEMP_EXTRACT}"
+	rm -f "${GHIDRA_FIRM_TEMP_ARCHIVE}"
+	rm -rf "${GHIDRA_FIRM_TEMP_EXTRACT}"
+}
+
+
+echo "Downloading ghidra"
+curl -Lo "${GHIDRA_TEMP_ARCHIVE}" "https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_${GHIDRA_VERSION}_build/ghidra_${GHIDRA_VERSION}_PUBLIC_${GHIDRA_DATE}.zip" || exit 1
+
+echo "Extracting ghidra"
+unzip -q "${GHIDRA_TEMP_ARCHIVE}" -d "${GHIDRA_TEMP_EXTRACT}" || exit 1
+cp -r "${GHIDRA_TEMP_EXTRACT}/ghidra_${GHIDRA_VERSION}_PUBLIC/"* "${GHIDRA_DIR}" || exit 1
+
+echo "Downloading ghidra-firmware-utils"
+curl -Lo "${GHIDRA_FIRM_TEMP_ARCHIVE}" "https://github.com/al3xtjames/ghidra-firmware-utils/releases/download/${GHIDRA_FIRM_DATE_LONG}/ghidra_${GHIDRA_FIRM_VERSION}_PUBLIC_${GHIDRA_FIRM_DATE}_ghidra-firmware-utils.zip"
+
+echo "Extracting ghidra-firmware-utils"
+unzip -q "${GHIDRA_FIRM_TEMP_ARCHIVE}" -d "${GHIDRA_FIRM_TEMP_EXTRACT}" || exit 1
+cp -r "${GHIDRA_FIRM_TEMP_EXTRACT}/"* "${GHIDRA_DIR}/Ghidra/Extensions/" || exit 1
+
+echo ""
+echo "Done. Ghidra is installed to ${GHIDRA_DIR}"
