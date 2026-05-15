@@ -3,7 +3,7 @@
   PLATFORM_GUID                  = 5EA3369D-57D1-4ACF-B7E1-8C87372C1B30
   PLATFORM_VERSION               = 1.0
   DSC_SPECIFICATION              = 0x00010005
-  OUTPUT_DIRECTORY               = /home/alexa/Documents/SanderStuff/AID-BUN/ugentic/uagent/builds/UagentDebugTestPkg
+  OUTPUT_DIRECTORY               = Build/UagentDebugTestPkg
   SUPPORTED_ARCHITECTURES        = X64
   BUILD_TARGETS                  = DEBUG
   SKUID_IDENTIFIER               = DEFAULT
