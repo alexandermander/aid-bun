@@ -1,5 +1,15 @@
 #include "Uagent.h"
 
+typedef struct {
+  EFI_HANDLE            SelectedHandle;
+  SOCKET_CONFIG_SOURCE  ConfigSource;
+  EFI_IPv4_ADDRESS      StationAddress;
+  EFI_IPv4_ADDRESS      SubnetMask;
+  EFI_IPv4_ADDRESS      DhcpServerAddress;
+} NETWORK_STATUS;
+
+STATIC NETWORK_STATUS  mLastNetworkStatus;
+
 STATIC
 VOID
 EFIAPI
@@ -31,116 +41,178 @@ WaitForTcp4Token (
   return CompletionToken->Status;
 }
 
-EFI_STATUS
-InitSocketClient (
-  IN  EFI_HANDLE     ImageHandle,
-  OUT SOCKET_CLIENT  *Client
+STATIC
+VOID
+UpdateLastNetworkStatus (
+  IN EFI_HANDLE                   SelectedHandle,
+  IN SOCKET_CONFIG_SOURCE         ConfigSource,
+  IN CONST EFI_IPv4_ADDRESS       *StationAddress OPTIONAL,
+  IN CONST EFI_IPv4_ADDRESS       *SubnetMask OPTIONAL,
+  IN CONST EFI_IPv4_ADDRESS       *DhcpServerAddress OPTIONAL
   )
 {
-  EFI_STATUS                  Status;
-  EFI_LOADED_IMAGE_PROTOCOL   *LoadedImage;
-  EFI_PXE_BASE_CODE_PROTOCOL  *PxeBaseCode;
-  EFI_HANDLE                  *HandleBuffer;
-  EFI_HANDLE                  ControllerHandle;
-  UINTN                       HandleCount;
-  UINTN                       HandleIndex;
-  EFI_TCP4_CONFIG_DATA        ConfigData;
-  EFI_IPv4_ADDRESS            RemoteAddress;
-  EFI_IPv4_ADDRESS            StationAddress;
-  EFI_IPv4_ADDRESS            SubnetMask;
-  BOOLEAN                     FoundPxeHandle;
+  mLastNetworkStatus.SelectedHandle = SelectedHandle;
+  mLastNetworkStatus.ConfigSource   = ConfigSource;
 
-  if (Client == NULL) {
+  if (StationAddress != NULL) {
+    CopyMem (&mLastNetworkStatus.StationAddress, StationAddress, sizeof (EFI_IPv4_ADDRESS));
+  } else {
+    ZeroMem (&mLastNetworkStatus.StationAddress, sizeof (EFI_IPv4_ADDRESS));
+  }
+
+  if (SubnetMask != NULL) {
+    CopyMem (&mLastNetworkStatus.SubnetMask, SubnetMask, sizeof (EFI_IPv4_ADDRESS));
+  } else {
+    ZeroMem (&mLastNetworkStatus.SubnetMask, sizeof (EFI_IPv4_ADDRESS));
+  }
+
+  if (DhcpServerAddress != NULL) {
+    CopyMem (&mLastNetworkStatus.DhcpServerAddress, DhcpServerAddress, sizeof (EFI_IPv4_ADDRESS));
+  } else {
+    ZeroMem (&mLastNetworkStatus.DhcpServerAddress, sizeof (EFI_IPv4_ADDRESS));
+  }
+}
+
+STATIC
+CONST CHAR16 *
+GetConfigSourceText (
+  IN SOCKET_CONFIG_SOURCE  ConfigSource
+  )
+{
+  switch (ConfigSource) {
+    case SocketConfigSourcePxe:
+      return L"pxe";
+    case SocketConfigSourceDhcpFallback:
+      return L"dhcp-fallback";
+    default:
+      return L"unknown";
+  }
+}
+
+STATIC
+VOID
+PrintIpv4Field (
+  IN CONST CHAR16        *Label,
+  IN CONST EFI_IPv4_ADDRESS  *Address
+  )
+{
+  if ((Label == NULL) || (Address == NULL)) {
+    return;
+  }
+
+  if (IsZeroIpv4Address (Address)) {
+    Print (L"%s: unavailable\n", Label);
+    return;
+  }
+
+  Print (
+    L"%s: %d.%d.%d.%d\n",
+    Label,
+    Address->Addr[0],
+    Address->Addr[1],
+    Address->Addr[2],
+    Address->Addr[3]
+    );
+}
+
+STATIC
+EFI_STATUS
+GetTcp4Candidates (
+  IN  EFI_HANDLE  ImageHandle,
+  OUT EFI_HANDLE  **HandleBuffer,
+  OUT UINTN       *HandleCount
+  )
+{
+  EFI_STATUS                Status;
+  EFI_HANDLE                *Tcp4Handles;
+  EFI_IP4_CONFIG2_PROTOCOL  *Ip4Config2;
+  EFI_HANDLE                *Candidates;
+  UINTN                     Tcp4HandleCount;
+  UINTN                     Index;
+  UINTN                     CandidateCount;
+
+  if ((HandleBuffer == NULL) || (HandleCount == NULL)) {
     return EFI_INVALID_PARAMETER;
   }
 
-  ZeroMem (Client, sizeof (*Client));
-  HandleBuffer     = NULL;
-  ControllerHandle = NULL;
-  HandleCount      = 0;
-  FoundPxeHandle   = FALSE;
+  *HandleBuffer = NULL;
+  *HandleCount  = 0;
+  Tcp4Handles   = NULL;
+  Candidates    = NULL;
 
-  ZeroMem (&StationAddress, sizeof (StationAddress));
-  ZeroMem (&SubnetMask, sizeof (SubnetMask));
-  ZeroMem (&RemoteAddress, sizeof (RemoteAddress));
-  ZeroMem (&ConfigData, sizeof (ConfigData));
-
-  Status = gBS->OpenProtocol (
-                  ImageHandle,
-                  &gEfiLoadedImageProtocolGuid,
-                  (VOID **)&LoadedImage,
-                  ImageHandle,
+  Status = gBS->LocateHandleBuffer (
+                  ByProtocol,
+                  &gEfiTcp4ServiceBindingProtocolGuid,
                   NULL,
-                  EFI_OPEN_PROTOCOL_GET_PROTOCOL
+                  &Tcp4HandleCount,
+                  &Tcp4Handles
                   );
-  if (!EFI_ERROR (Status) && (LoadedImage->DeviceHandle != NULL)) {
+  if (EFI_ERROR (Status) || (Tcp4HandleCount == 0)) {
+    return EFI_NOT_FOUND;
+  }
+
+  Candidates = AllocateZeroPool (sizeof (EFI_HANDLE) * Tcp4HandleCount);
+  if (Candidates == NULL) {
+    FreePool (Tcp4Handles);
+    return EFI_OUT_OF_RESOURCES;
+  }
+
+  CandidateCount = 0;
+  for (Index = 0; Index < Tcp4HandleCount; Index++) {
     Status = gBS->OpenProtocol (
-                    LoadedImage->DeviceHandle,
-                    &gEfiPxeBaseCodeProtocolGuid,
-                    (VOID **)&PxeBaseCode,
+                    Tcp4Handles[Index],
+                    &gEfiIp4Config2ProtocolGuid,
+                    (VOID **)&Ip4Config2,
                     ImageHandle,
                     NULL,
                     EFI_OPEN_PROTOCOL_GET_PROTOCOL
                     );
-    if (!EFI_ERROR (Status) &&
-        (PxeBaseCode->Mode != NULL) &&
-        PxeBaseCode->Mode->Started &&
-        !PxeBaseCode->Mode->UsingIpv6 &&
-        PxeBaseCode->Mode->DhcpAckReceived)
-    {
-      ControllerHandle = LoadedImage->DeviceHandle;
-      CopyMem (&StationAddress, &PxeBaseCode->Mode->StationIp.v4, sizeof (StationAddress));
-      CopyMem (&SubnetMask, &PxeBaseCode->Mode->SubnetMask.v4, sizeof (SubnetMask));
-      FoundPxeHandle = TRUE;
+    if (EFI_ERROR (Status) || (Ip4Config2 == NULL)) {
+      continue;
     }
+
+    Candidates[CandidateCount++] = Tcp4Handles[Index];
   }
 
-  if (!FoundPxeHandle) {
-    Status = gBS->LocateHandleBuffer (
-                    ByProtocol,
-                    &gEfiPxeBaseCodeProtocolGuid,
-                    NULL,
-                    &HandleCount,
-                    &HandleBuffer
-                    );
-    if (EFI_ERROR (Status) || (HandleCount == 0)) {
-      Print (L"InitSocketClient: no PXE base code handles: %r\n", Status);
-      return EFI_NOT_FOUND;
-    }
-
-    for (HandleIndex = 0; HandleIndex < HandleCount; HandleIndex++) {
-      Status = gBS->OpenProtocol (
-                      HandleBuffer[HandleIndex],
-                      &gEfiPxeBaseCodeProtocolGuid,
-                      (VOID **)&PxeBaseCode,
-                      ImageHandle,
-                      NULL,
-                      EFI_OPEN_PROTOCOL_GET_PROTOCOL
-                      );
-      if (EFI_ERROR (Status) || (PxeBaseCode->Mode == NULL)) {
-        continue;
-      }
-
-      if (PxeBaseCode->Mode->Started &&
-          !PxeBaseCode->Mode->UsingIpv6 &&
-          PxeBaseCode->Mode->DhcpAckReceived)
-      {
-        ControllerHandle = HandleBuffer[HandleIndex];
-        CopyMem (&StationAddress, &PxeBaseCode->Mode->StationIp.v4, sizeof (StationAddress));
-        CopyMem (&SubnetMask, &PxeBaseCode->Mode->SubnetMask.v4, sizeof (SubnetMask));
-        FoundPxeHandle = TRUE;
-        break;
-      }
-    }
-
-    FreePool (HandleBuffer);
-    if (!FoundPxeHandle) {
-      Print (L"InitSocketClient: no PXE handle with IPv4 DHCP state\n");
-      return EFI_NOT_FOUND;
-    }
+  FreePool (Tcp4Handles);
+  if (CandidateCount == 0) {
+    FreePool (Candidates);
+    return EFI_NOT_FOUND;
   }
 
+  *HandleBuffer = Candidates;
+  *HandleCount  = CandidateCount;
+  return EFI_SUCCESS;
+}
+
+
+STATIC
+EFI_STATUS
+ConfigureTcp4Client (
+  IN  EFI_HANDLE            ImageHandle,
+  IN  EFI_HANDLE            ControllerHandle,
+  IN  SOCKET_CONFIG_SOURCE  ConfigSource,
+  IN  EFI_IPv4_ADDRESS      *StationAddress,
+  IN  EFI_IPv4_ADDRESS      *SubnetMask,
+  IN  EFI_IPv4_ADDRESS      *DhcpServerAddress,
+  OUT SOCKET_CLIENT         *Client
+  )
+{
+  EFI_STATUS            Status;
+  EFI_TCP4_CONFIG_DATA  ConfigData;
+  EFI_IPv4_ADDRESS      RemoteAddress;
+
+  if ((StationAddress == NULL) || (SubnetMask == NULL) || (DhcpServerAddress == NULL) || (Client == NULL)) {
+    return EFI_INVALID_PARAMETER;
+  }
+
+  ZeroMem (Client, sizeof (*Client));
   Client->ServiceHandle = ControllerHandle;
+  Client->SelectedHandle = ControllerHandle;
+  Client->ConfigSource = ConfigSource;
+  CopyMem (&Client->StationAddress, StationAddress, sizeof (Client->StationAddress));
+  CopyMem (&Client->SubnetMask, SubnetMask, sizeof (Client->SubnetMask));
+  CopyMem (&Client->DhcpServerAddress, DhcpServerAddress, sizeof (Client->DhcpServerAddress));
 
   Status = gBS->OpenProtocol (
                   Client->ServiceHandle,
@@ -194,19 +266,24 @@ InitSocketClient (
     goto Error;
   }
 
+  ZeroMem (&RemoteAddress, sizeof (RemoteAddress));
+  ZeroMem (&ConfigData, sizeof (ConfigData));
   RemoteAddress.Addr[0] = 192;
   RemoteAddress.Addr[1] = 168;
-  RemoteAddress.Addr[2] = 70;
+  RemoteAddress.Addr[2] = 122;
   RemoteAddress.Addr[3] = 1;
 
   ConfigData.TypeOfService                 = 0;
   ConfigData.TimeToLive                    = 64;
-  ConfigData.AccessPoint.UseDefaultAddress = FALSE;
+  ConfigData.AccessPoint.UseDefaultAddress = (BOOLEAN)(ConfigSource == SocketConfigSourceDhcpFallback);
   ConfigData.AccessPoint.ActiveFlag        = TRUE;
   ConfigData.AccessPoint.StationPort       = 0;
   ConfigData.AccessPoint.RemotePort        = REMOTE_PORT;
-  CopyMem (&ConfigData.AccessPoint.StationAddress, &StationAddress, sizeof (EFI_IPv4_ADDRESS));
-  CopyMem (&ConfigData.AccessPoint.SubnetMask, &SubnetMask, sizeof (EFI_IPv4_ADDRESS));
+  if (!ConfigData.AccessPoint.UseDefaultAddress) {
+    CopyMem (&ConfigData.AccessPoint.StationAddress, StationAddress, sizeof (EFI_IPv4_ADDRESS));
+    CopyMem (&ConfigData.AccessPoint.SubnetMask, SubnetMask, sizeof (EFI_IPv4_ADDRESS));
+  }
+
   CopyMem (&ConfigData.AccessPoint.RemoteAddress, &RemoteAddress, sizeof (EFI_IPv4_ADDRESS));
 
   Status = Client->Tcp4->Configure (Client->Tcp4, &ConfigData);
@@ -221,13 +298,29 @@ InitSocketClient (
 
   Status = Client->Tcp4->Connect (Client->Tcp4, &Client->ConnectToken);
   if (EFI_ERROR (Status)) {
+    if (ConfigSource == SocketConfigSourceDhcpFallback) {
+      Print (L"TCP4 connect failed after DHCP\n");
+    }
+
     Print (L"InitSocketClient: TCP4 connect start failed: %r\n", Status);
     goto Error;
   }
 
   Status = WaitForTcp4Token (Client->Tcp4, &Client->ConnectToken.CompletionToken);
   if (!EFI_ERROR (Status)) {
+    Print (
+      L"Connected to server %d.%d.%d.%d:%d\n",
+      RemoteAddress.Addr[0],
+      RemoteAddress.Addr[1],
+      RemoteAddress.Addr[2],
+      RemoteAddress.Addr[3],
+      REMOTE_PORT
+      );
     return Status;
+  }
+
+  if (ConfigSource == SocketConfigSourceDhcpFallback) {
+    Print (L"TCP4 connect failed after DHCP\n");
   }
 
   Print (L"InitSocketClient: TCP4 connect completion failed: %r\n", Status);
@@ -235,6 +328,108 @@ InitSocketClient (
 Error:
   CloseSocketClient (Client);
   return Status;
+}
+
+EFI_STATUS
+InitSocketClient (
+  IN  EFI_HANDLE     ImageHandle,
+  OUT SOCKET_CLIENT  *Client
+  )
+{
+  EFI_STATUS        Status;
+  EFI_STATUS        LastError;
+  EFI_HANDLE        ControllerHandle;
+  EFI_HANDLE        *CandidateHandles;
+  UINTN             CandidateCount;
+  UINTN             CandidateIndex;
+  EFI_IPv4_ADDRESS  StationAddress;
+  EFI_IPv4_ADDRESS  SubnetMask;
+  EFI_IPv4_ADDRESS  DhcpServerAddress;
+
+  if (Client == NULL) {
+    return EFI_INVALID_PARAMETER;
+  }
+
+  ZeroMem (Client, sizeof (*Client));
+  ControllerHandle = NULL;
+  CandidateHandles = NULL;
+  CandidateCount   = 0;
+  LastError        = EFI_NOT_FOUND;
+  ZeroMem (&StationAddress, sizeof (StationAddress));
+  ZeroMem (&SubnetMask, sizeof (SubnetMask));
+  ZeroMem (&DhcpServerAddress, sizeof (DhcpServerAddress));
+  UpdateLastNetworkStatus (NULL, SocketConfigSourceUnknown, NULL, NULL, NULL);
+
+  Status = TryGetPxeConfig (ImageHandle, &ControllerHandle, &StationAddress, &SubnetMask, &DhcpServerAddress);
+  if (!EFI_ERROR (Status)) {
+    UpdateLastNetworkStatus (
+      ControllerHandle,
+      SocketConfigSourcePxe,
+      &StationAddress,
+      &SubnetMask,
+      &DhcpServerAddress
+      );
+    return ConfigureTcp4Client (
+             ImageHandle,
+             ControllerHandle,
+             SocketConfigSourcePxe,
+             &StationAddress,
+             &SubnetMask,
+             &DhcpServerAddress,
+             Client
+             );
+  }
+
+  Print (L"PXE config unavailable\n");
+
+  Status = GetTcp4Candidates (ImageHandle, &CandidateHandles, &CandidateCount);
+  if (EFI_ERROR (Status)) {
+    Print (L"No usable NIC with IP4Config2 + TCP4\n");
+    return Status;
+  }
+
+  for (CandidateIndex = 0; CandidateIndex < CandidateCount; CandidateIndex++) {
+    ControllerHandle = CandidateHandles[CandidateIndex];
+    UpdateLastNetworkStatus (ControllerHandle, SocketConfigSourceDhcpFallback, NULL, NULL, NULL);
+    Status           = AcquireDhcpFallbackConfig (
+                         ImageHandle,
+                         ControllerHandle,
+                         &StationAddress,
+                         &SubnetMask,
+                         &DhcpServerAddress
+                         );
+    if (EFI_ERROR (Status)) {
+      LastError = Status;
+      continue;
+    }
+
+    UpdateLastNetworkStatus (
+      ControllerHandle,
+      SocketConfigSourceDhcpFallback,
+      &StationAddress,
+      &SubnetMask,
+      &DhcpServerAddress
+      );
+
+    Status = ConfigureTcp4Client (
+               ImageHandle,
+               ControllerHandle,
+               SocketConfigSourceDhcpFallback,
+               &StationAddress,
+               &SubnetMask,
+               &DhcpServerAddress,
+               Client
+               );
+    if (!EFI_ERROR (Status)) {
+      FreePool (CandidateHandles);
+      return EFI_SUCCESS;
+    }
+
+    LastError = Status;
+  }
+
+  FreePool (CandidateHandles);
+  return LastError;
 }
 
 EFI_STATUS
@@ -663,4 +858,28 @@ CloseSocketClient (
   if (Client->CloseEvent != NULL) {
     gBS->CloseEvent (Client->CloseEvent);
   }
+
+  ZeroMem (Client, sizeof (*Client));
+}
+
+VOID
+PrintLastNetworkStatus (
+  VOID
+  )
+{
+  Print (L"Last network attempt:\n");
+  Print (L"  source: %s\n", GetConfigSourceText (mLastNetworkStatus.ConfigSource));
+  Print (L"  handle: %p\n", mLastNetworkStatus.SelectedHandle);
+  PrintIpv4Field (L"  local IPv4", &mLastNetworkStatus.StationAddress);
+  PrintIpv4Field (L"  subnet mask", &mLastNetworkStatus.SubnetMask);
+  PrintIpv4Field (L"  DHCP server", &mLastNetworkStatus.DhcpServerAddress);
+}
+
+VOID
+PrintIpStatus (
+  VOID
+  )
+{
+  PrintIpv4Field (L"IPv4", &mLastNetworkStatus.StationAddress);
+  PrintIpv4Field (L"DHCP server", &mLastNetworkStatus.DhcpServerAddress);
 }

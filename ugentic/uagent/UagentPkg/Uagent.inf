@@ -7,6 +7,7 @@
   ENTRY_POINT                    = UefiMain
 
 [Sources]
+  DhcpConfig.c
   Uagent.c
   Shell.c
   TcpClient.c
@@ -27,6 +28,8 @@
   UefiRuntimeServicesTableLib
 
 [Protocols]
+  gEfiDhcp4ProtocolGuid
+  gEfiIp4Config2ProtocolGuid
   gEfiLoadedImageProtocolGuid
   gEfiPxeBaseCodeProtocolGuid
   gEfiTcp4ProtocolGuid

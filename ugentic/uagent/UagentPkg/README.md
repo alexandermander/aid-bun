@@ -1,12 +1,12 @@
 # UagentPkg
 
-`UagentPkg` is a small EDK2 UEFI application intended to start after PXE boot, reuse the DHCP-provided IPv4 configuration, connect to a fixed server on TCP port `8080`, and provide a server-driven remote-control session.
+`UagentPkg` is a small EDK2 UEFI application intended to start after PXE boot, prefer PXE-derived IPv4 configuration when present, fall back to an already-configured IPv4 interface when PXE state is unavailable, connect to a fixed server on TCP port `8080`, and provide a server-driven remote-control session.
 
 ## Current layout
 
 - `Uagent.c`: UEFI entry point only.
 - `Shell.c`: interactive shell, command parsing, and dispatch.
-- `TcpClient.c`: PXE/TCP4 discovery, socket setup, transmit, receive, and cleanup.
+- `TcpClient.c`: PXE-first and existing-IPv4 network discovery, TCP4 setup, transmit, receive, and cleanup.
 - `Uagent.h`: shared internal constants, types, and function declarations.
 - `Uagent.inf`: module definition.
 - `UagentPkg.dsc`: package/platform build description.
@@ -15,6 +15,7 @@
 
 - On boot, the app prints its version and disables the UEFI watchdog timer.
 - On boot, the EFI app immediately connects out to the server and enters a persistent remote session loop.
+- Connection order is `PXE first, existing IPv4 second`.
 - The server sends packets to EFI, and EFI sends result packets back.
 - If the server session fails to start, the app falls back to the local shell.
 
@@ -43,6 +44,8 @@
 
 - `help`: show command list.
 - `connect`: retry the remote session manually.
+- `ip`: show the last acquired IPv4 address and DHCP server.
+- `netstatus`: show the last connection source, selected NIC handle, and acquired local IPv4 state.
 - `exit` or `quit`: leave the CLI.
 
 ## Build
@@ -60,7 +63,8 @@ The generated EFI binary is written to:
 ## Notes
 
 - The remote server address is currently hard-coded in `TcpClient.c` as `192.168.70.1:8080`.
-- The application expects PXE DHCP to have already completed on the selected NIC.
+- Connection order is `PXE first, existing IPv4 second`.
+- If PXE DHCP state is unavailable, the application scans for the first handle that exposes both `EFI_TCP4_SERVICE_BINDING_PROTOCOL` and `EFI_IP4_CONFIG2_PROTOCOL`, and uses that NIC only when firmware already reports a non-zero station address and subnet mask.
 - Binary requests use the packet format `[command:1][payload_length:2][payload:N]`.
 - TCP is a byte stream, so header and payload may arrive in the same receive call.
 - The EFI client now keeps a small internal receive stash so extra bytes are not lost between header and payload reads.
@@ -75,7 +79,6 @@ The generated EFI binary is written to:
   - `8 = TcpEchoText`
 - The current `Shell.c` remote dispatcher actively handles `TcpSendText`, `TcpGetApps`, `TcpDisconnectSession`, `TcpEchoText`, `TcpPushEfiApp`, and `TcpExecuteEfiApp`.
 - Uploaded EFI binaries are kept in memory for the duration of the remote session and executed with `LoadImage()` and `StartImage()`.
-
 
 
 

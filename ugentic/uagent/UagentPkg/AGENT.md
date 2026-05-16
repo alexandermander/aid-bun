@@ -5,105 +5,52 @@
 `UagentPkg` is a small EDK2 UEFI application that:
 
 - starts after PXE boot
-- reuses the NIC's DHCP-provided IPv4 configuration
+- prefers PXE-derived IPv4 configuration and falls back to self-DHCP with `EFI_IP4_CONFIG2_PROTOCOL`
 - connects to a fixed remote server at `192.168.70.1:8080`
 - runs a server-driven remote session over a custom TCP packet protocol
 - falls back to a local shell if the remote session cannot start
 
 This is not a normal userspace socket program. It depends on UEFI PXE and TCP4 protocols being present on the booted machine.
+The connection order is `PXE first, self-DHCP fallback second`.
 
 ## Project structure
 
-- `UagentPkg/Uagent.c`
+- `Uagent.c`
   - UEFI entry point
   - disables watchdog
   - starts the remote session first
   - installs the debug protocol used by other EFI apps to send text back to the server
 
-- `UagentPkg/Shell.c`
+- `Shell.c`
   - local fallback shell
   - remote-session loop and remote command dispatcher
+  - exposes `connect` and `netstatus` in the local shell
   - handles commands such as `help`, `status`, `echo`, `disconnect`, `reboot`
   - handles uploaded EFI apps and execution
 
-- `UagentPkg/TcpClient.c`
-  - finds PXE state
+- `TcpClient.c`
+  - tries PXE IPv4 state first
+  - scans TCP4 + IP4Config2 NIC candidates when PXE state is missing
+  - requests DHCP through `EFI_IP4_CONFIG2_PROTOCOL`
   - opens TCP4 service binding
   - creates and configures a TCP4 child
   - sends and receives packets
   - cleans up the connection
 
-- `UagentPkg/Uagent.h`
+- `Uagent.h`
   - shared constants, enums, structs, and function declarations
 
-- `UagentPkg/Uagent.inf`
+- `Uagent.inf`
   - EDK2 module definition
 
-- `UagentPkg/UagentPkg.dsc`
+- `UagentPkg.dsc`
   - package/platform build description
-
-- `UagentPrintTcpExPkg/`
-  - standalone test package that locates the custom debug protocol
-  - builds `UagentDebugTest.efi`
-
-- `builds/`
-  - shared output directory for local package builds in this repo
-
-## Build environment
-
-This repo is not the EDK2 workspace root. The actual EDK2 workspace used here is:
-
-- `WORKSPACE=/home/alexa/Documents/SanderStuff/aau/cyber2/edk2`
-- `EDK_TOOLS_PATH=/home/alexa/Documents/SanderStuff/aau/cyber2/edk2/BaseTools`
-- `CONF_PATH=/home/alexa/Documents/SanderStuff/aau/cyber2/edk2/Conf`
-
-In a fresh shell, `build` may not exist until EDK2 setup is sourced:
-
-```sh
-cd /home/alexa/Documents/SanderStuff/aau/cyber2/edk2
-source edksetup.sh
-```
-
-After that, build packages from this repo by pointing `PACKAGES_PATH` at the repo root:
-
-```sh
-PACKAGES_PATH=/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/uagent
-```
-
-Do not assume relative `-p UagentPkg/...` paths will resolve to this repo unless `PACKAGES_PATH` is set correctly.
-
-## Build commands
-
-Build the main Uagent app:
-
-```sh
-PACKAGES_PATH=/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/uagent build \
-  -p /home/alexa/Documents/SanderStuff/AID-BUN/ugentic/uagent/UagentPkg/UagentPkg.dsc \
-  -m UagentPkg/Uagent.inf \
-  -a X64 -b DEBUG -t GCC5
-```
-
-Build the debug test app:
-
-```sh
-PACKAGES_PATH=/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/uagent build \
-  -p /home/alexa/Documents/SanderStuff/AID-BUN/ugentic/uagent/UagentPrintTcpExPkg/UagentDebugTestPkg.dsc \
-  -m UagentPrintTcpExPkg/UagentDebugTest.inf \
-  -a X64 -b DEBUG -t GCC5
-```
-
-Expected outputs:
-
-- `builds/UagentPkg/DEBUG_GCC5/X64/Uagent.efi`
-- `builds/UagentDebugTestPkg/DEBUG_GCC5/X64/UagentDebugTest.efi`
-
-EDK2 on Linux may emit a harmless final warning about copying `*.pdb` files. That does not mean the `.efi` build failed if the `.efi` file exists.
 
 ## Boot and runtime flow
 
 1. `UefiMain()` in `Uagent.c` starts the app.
 2. The app immediately tries `RunRemoteSession()`.
-3. `InitSocketClient()` in `TcpClient.c` reuses PXE DHCP IPv4 settings and opens TCP4.
+3. `InitSocketClient()` in `TcpClient.c` tries `PXE first, self-DHCP fallback second`, then opens TCP4 on the selected NIC.
 4. If connection succeeds, the EFI app enters a persistent remote-command loop.
 5. If connection fails, the app drops to the local shell and the `connect` command can retry.
 
@@ -189,8 +136,9 @@ This project only works on machines where UEFI exposes the needed network stack.
 
 The common failure pattern is:
 
-- PXE exists
-- but `EFI_TCP4_SERVICE_BINDING_PROTOCOL` is missing or unsupported on that NIC
+- PXE state is missing
+- or `EFI_TCP4_SERVICE_BINDING_PROTOCOL` / `EFI_IP4_CONFIG2_PROTOCOL` is missing on candidate NICs
+- or DHCP fallback times out without a lease
 
 When that happens, the app fails before any packets appear in Wireshark.
 

@@ -381,6 +381,8 @@ PrintHelp (
   Print (L"Commands:\n");
   Print (L"  help           Show this help\n");
   Print (L"  connect        Start a manual interactive server session\n");
+  Print (L"  ip             Show current IPv4 and DHCP server state\n");
+  Print (L"  netstatus      Show last network selection and IPv4 state\n");
   Print (L"  exit           Leave the CLI\n");
 }
 
@@ -474,6 +476,16 @@ RunShell (
         Print (L"Remote session closed.\n");
       }
 
+      continue;
+    }
+
+    if (StrCmp (Command, L"netstatus") == 0) {
+      PrintLastNetworkStatus ();
+      continue;
+    }
+
+    if (StrCmp (Command, L"ip") == 0) {
+      PrintIpStatus ();
       continue;
     }
 

@@ -9,20 +9,30 @@
 #include <Library/UefiBootServicesTableLib.h>
 #include <Library/UefiLib.h>
 #include <Library/UefiRuntimeServicesTableLib.h>
+#include <Protocol/Dhcp4.h>
 #include <Protocol/LoadedImage.h>
+#include <Protocol/Ip4Config2.h>
 #include <Protocol/PxeBaseCode.h>
 #include <Protocol/ServiceBinding.h>
 #include <Protocol/Tcp4.h>
 
-#define UAGENT_VERSION         L"1.5.3"
+#define UAGENT_VERSION         L"1.6.3"
 #define REMOTE_PORT            8080
 #define COMMAND_BUF_SIZE       128
 #define RESPONSE_CHUNK_SIZE    512
 #define COMMAND_HEADER_SIZE    3
+#define DHCP_FALLBACK_TIMEOUT_SECONDS  15
+
+typedef enum {
+  SocketConfigSourceUnknown = 0,
+  SocketConfigSourcePxe,
+  SocketConfigSourceDhcpFallback
+} SOCKET_CONFIG_SOURCE;
 
 typedef struct {
   EFI_HANDLE                    ServiceHandle;
   EFI_HANDLE                    ChildHandle;
+  EFI_HANDLE                    SelectedHandle;
   EFI_SERVICE_BINDING_PROTOCOL  *ServiceBinding;
   EFI_TCP4_PROTOCOL             *Tcp4;
   EFI_EVENT                     ConnectEvent;
@@ -35,6 +45,10 @@ typedef struct {
   EFI_TCP4_CLOSE_TOKEN          CloseToken;
   UINT8                         ReceiveStash[RESPONSE_CHUNK_SIZE];
   UINTN                         ReceiveStashLength;
+  SOCKET_CONFIG_SOURCE          ConfigSource;
+  EFI_IPv4_ADDRESS              StationAddress;
+  EFI_IPv4_ADDRESS              SubnetMask;
+  EFI_IPv4_ADDRESS              DhcpServerAddress;
 } SOCKET_CLIENT;
 
 typedef enum {
@@ -82,6 +96,29 @@ InitSocketClient (
   OUT SOCKET_CLIENT  *Client
   );
 
+BOOLEAN
+IsZeroIpv4Address (
+  IN CONST EFI_IPv4_ADDRESS  *Address
+  );
+
+EFI_STATUS
+TryGetPxeConfig (
+  IN  EFI_HANDLE        ImageHandle,
+  OUT EFI_HANDLE        *ControllerHandle,
+  OUT EFI_IPv4_ADDRESS  *StationAddress,
+  OUT EFI_IPv4_ADDRESS  *SubnetMask,
+  OUT EFI_IPv4_ADDRESS  *DhcpServerAddress
+  );
+
+EFI_STATUS
+AcquireDhcpFallbackConfig (
+  IN  EFI_HANDLE        ImageHandle,
+  IN  EFI_HANDLE        ControllerHandle,
+  OUT EFI_IPv4_ADDRESS  *StationAddress,
+  OUT EFI_IPv4_ADDRESS  *SubnetMask,
+  OUT EFI_IPv4_ADDRESS  *DhcpServerAddress
+  );
+
 EFI_STATUS
 SendCommandPacket (
   IN SOCKET_CLIENT      *Client,
@@ -107,6 +144,16 @@ ReceiveAndPrintResponse (
 VOID
 CloseSocketClient (
   IN SOCKET_CLIENT  *Client
+  );
+
+VOID
+PrintLastNetworkStatus (
+  VOID
+  );
+
+VOID
+PrintIpStatus (
+  VOID
   );
 
 EFI_STATUS
