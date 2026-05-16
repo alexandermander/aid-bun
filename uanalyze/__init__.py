@@ -1,2 +1,0 @@
-"""UEFI analysis pipeline package."""
-

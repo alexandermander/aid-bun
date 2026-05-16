@@ -22,3 +22,5 @@
 
 # Make sure to ignore edk2 build directory
 ugentic/uagent/builds/
+work/
+ugentic/uagent/UagentDeploymentPkg/

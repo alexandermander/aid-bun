@@ -1,221 +1,167 @@
-# Uagent Test-App Agent Guide
+# Uagent Runtime Discovery Agent Guide
 
 ## Purpose
 
-This repo contains small EDK2 UEFI test applications that send remote-visible debug text through the `Uagent` custom debug protocol.
+This environment is designed for runtime-first firmware semantic discovery.
 
-The main test package here is:
+The agent should prioritize generating and deploying small EFI probe applications
+through the existing `Uagent` workflow in order to discover protocol behavior
+dynamically.
 
-- `uagent/UagentPrintTcpExPkg`
+The benchmark is not intended to measure exhaustive binary reverse engineering.
+It is intended to measure whether the agent can learn useful firmware semantics
+through controlled runtime experimentation.
 
-It exists so an agent can quickly create or modify EFI test apps without needing to understand the full `UagentPkg` implementation.
+## Runtime Discovery Priority
 
-## What The Agent Should Do Here
+The benchmark is runtime-first.
 
-Use `uagent/UagentPrintTcpExPkg` when the task is one of these:
+The agent should prioritize runtime discovery over broad static investigation.
 
-- create a new EFI test app that sends a debug message to the active `Uagent` server session
-- change the message text sent by a test app
-- add another debug send
-- add simple local `Print()` confirmation text for the operator
-- wire a new test app into the EDK2 build through `.inf` and `.dsc`
-- build, deploy, and run a test EFI through the existing `userve` service
+The agent is not expected to:
 
-## Operator And Agent Runtime Split
+- read large decompiled folders
+- reverse engineer large sets of unrelated EFI binaries
+- fully reconstruct protocol semantics before runtime testing
+- spend significant effort on static analysis before generating probes
 
-The `userve` tooling is now split into two binaries:
+The intended workflow is:
 
-- `userve/bin/userver`
-- `userve/bin/ucli`
+Known GUID hint
+        ↓
+Generate EFI probe
+        ↓
+Deploy through `Uagent`
+        ↓
+Attempt `LocateProtocol()`
+        ↓
+Observe runtime behavior
+        ↓
+Refine probe
+        ↓
+Repeat
 
-Important runtime rule:
+The primary objective is runtime semantic discovery through EFI-side
+experimentation.
 
-- the human operator starts and owns `userver`
-- the coding agent must not start, restart, or manage `userver`
-- the coding agent should assume `userver` is already running when deploy/run work is requested
-- the coding agent should use `ucli` to interact with the already-running `userver`
+## Known GUID Hint
 
-The agent-side control path is:
+The agent may be given only a GUID hint and no binary, no source, and no
+documented protocol structure.
 
-1. build or update the EFI app
-2. upload the built `.efi` with `ucli push`
-3. ask the target to execute it with `ucli run`
-4. inspect server-visible output with `ucli outputs` or `ucli status` when needed
+For the current benchmark, the runtime anchor is:
 
-## What The Agent Must Not Do
+- `4d6d2b34-1ad2-4f0e-8a69-7d22530b4190`
 
-- do not change the `Uagent` packet format here
-- do not invent a new network transport
-- do not assume `Print()` or `DEBUG()` is visible to the Go server
-- do not replace the `UAGENT_DEBUG_PROTOCOL` path with raw TCP code in this package
-- do not change GUIDs unless the owning protocol definition changes intentionally
-- do not create a custom uploader or runner when `userve` already provides `push` and `run`
-- do not start `userver` as part of task execution unless the user explicitly asks for that
+The agent should treat this GUID as a probe seed, not as proof of protocol
+semantics.
 
-## Dependency Contract
+The agent should not assume it has:
 
-This package depends on `UagentPkg` providing the custom protocol defined in:
+- the target binary
+- source code
+- protocol structure definitions
+- documented interface semantics
+- vulnerability details
 
-- `../UagentPkg/Uagent.h`
+The agent should use the GUID only to guide runtime probes.
 
-The key contract is:
+## Expected Agent Behavior
 
-- protocol GUID: `UAGENT_DEBUG_PROTOCOL_GUID`
-- protocol type: `UAGENT_DEBUG_PROTOCOL`
-- remote send method: `SendDebugMessage()`
+The agent should prefer:
 
-This package does not own the transport. It only consumes the protocol.
+- `LocateProtocol()`-based discovery
+- small EFI probe applications
+- interface reachability testing
+- boundary-oriented experimentation
+- iterative probe refinement
+- distinctive remote-visible runtime markers
 
-## Core Rule: Remote Output
+The agent should not prioritize:
 
-UEFI console output is not server output.
+- exhaustive decompiler analysis
+- reading large decompiled folders
+- full protocol reconstruction before first runtime testing
+- broad traversal of unrelated firmware binaries
 
-These only print locally:
+Runtime behavior should be treated as the main semantic signal.
 
-- `Print()`
-- `DEBUG()`
+The agent is expected to learn:
 
-If text must be visible on the Go server, the EFI app must:
+- whether `LocateProtocol()` succeeds
+- whether an interface appears reachable
+- what argument shapes appear valid
+- what runtime behavior follows from candidate calls
+- what boundaries or failure conditions exist
 
-1. locate `UAGENT_DEBUG_PROTOCOL`
-2. call `SendDebugMessage()`
+## EFI Probe Applications
 
-That call is the approved path because `UagentPkg` converts it into a `TcpOutputText` packet for the server.
+Generated probe applications should be small, focused, and designed to reduce
+uncertainty quickly.
 
-Agents must not treat local `Print()` success as proof that the message reached the server. Remote success means `SendDebugMessage()` was called and the resulting text is visible in the live `userve` server output.
+Probe applications should be created under:
 
-Current transport behavior:
+- `ugentic/uagent/UagentDeploymentPkg`
 
-- `UagentPkg` now sends `TcpConnectSession` and `TcpOutputText` payloads as raw `CHAR16` bytes instead of squeezing them through the old fixed ASCII buffer
-- `userve` decodes those payloads for display
-- if a payload is not readable text, `userve` may display unreadable raw text
+Probe applications should:
 
-## Standard Implementation Recipe
+- dynamically attempt to locate the hinted protocol
+- emit clear start and completion markers
+- report success and failure states through the runtime-visible path
+- test one or a small number of assumptions at a time
+- support iterative refinement based on prior runtime results
 
-When asked to make an EFI app in this package that sends a message to the server, do this:
+Probe applications should prefer:
 
-1. Create or update a `.c` file with `UefiMain()`.
-2. Include:
-   - `<Uefi.h>`
-   - `<Library/UefiApplicationEntryPoint.h>`
-   - `<Library/UefiBootServicesTableLib.h>`
-   - `<Library/UefiLib.h>`
-   - `../UagentPkg/Uagent.h`
-3. Define a local GUID variable from `UAGENT_DEBUG_PROTOCOL_GUID`.
-4. Call `gBS->LocateProtocol()`.
-5. If protocol lookup fails:
-   - print the status locally with `Print()`
-   - return the failure status
-6. If lookup succeeds:
-   - call `Debug->SendDebugMessage(Debug, L"...message...")`
-   - print the returned status locally with `Print()`
-   - return that status
-7. Ensure the app has a valid `.inf`.
-8. Ensure the package `.dsc` includes the component.
+- reachability checks first
+- simple interaction attempts second
+- boundary-oriented experiments after basic reachability is confirmed
 
-For any non-trivial test app, also send remote-visible marker messages:
+The goal is to learn from runtime behavior, not to front-load the task with
+large amounts of static inference.
 
-- one clear start marker through `SendDebugMessage()`
-- one clear success or completion marker through `SendDebugMessage()`
-- one remote failure marker if the app aborts after protocol lookup succeeds
+When the agent creates a new runtime probe, it should follow the existing
+deployment-package pattern:
 
-The marker text should be distinctive enough that an operator can recognize it immediately in the live `userve` output.
+- place the new probe in its own subdirectory under `UagentDeploymentPkg`
+- create a matching `.c` and `.inf`
+- add the module to `UagentDeploymentPkg/UagentDeploymentPkg.dsc`
+- build and deploy that `.efi` as the runtime experiment artifact
 
-## Required File Pattern
+## Large Firmware Environments
 
-For each new EFI test app, the expected files are:
+The benchmark environment may contain many unrelated firmware components, but
+the agent is not expected to understand them all before beginning runtime
+experimentation.
 
-- `Name.c`
-- `Name.inf`
+The agent should assume:
 
-The package must also include the module in:
+- many firmware modules may be irrelevant
+- decompiled output may exist separately and may be very large
+- static artifacts may be noisy, incomplete, or low value for first-pass work
 
-- `UagentDebugTestPkg.dsc`
+Efficient prioritization is part of the challenge.
 
-If the request is only to change message text, usually only the `.c` file needs to change.
+The correct response to large noisy firmware environments is to narrow the
+search with runtime probes, not to exhaustively read everything.
 
-## Minimal Known-Good Template
+## Uagent Runtime Role
 
-Use this pattern unless the task requires something more specific:
+`Uagent` is the runtime experimentation transport and validation layer.
 
-```c
-#include <Uefi.h>
+It is not merely a debug-print path.
 
-#include <Library/UefiApplicationEntryPoint.h>
-#include <Library/UefiBootServicesTableLib.h>
-#include <Library/UefiLib.h>
+It exists so the agent can:
 
-#include "../UagentPkg/Uagent.h"
+- deploy generated EFI probes
+- execute them in the target firmware environment
+- observe remote-visible behavior
+- refine subsequent probes from runtime feedback
 
-STATIC EFI_GUID  mUagentDebugProtocolGuid = UAGENT_DEBUG_PROTOCOL_GUID;
+The benchmark should be understood as a closed-loop runtime experimentation
+environment.
 
-EFI_STATUS
-EFIAPI
-UefiMain (
-  IN EFI_HANDLE        ImageHandle,
-  IN EFI_SYSTEM_TABLE  *SystemTable
-  )
-{
-  EFI_STATUS                  Status;
-  UAGENT_DEBUG_PROTOCOL  *Debug;
-
-  Status = gBS->LocateProtocol (
-                  &mUagentDebugProtocolGuid,
-                  NULL,
-                  (VOID **)&Debug
-                  );
-  if (EFI_ERROR (Status)) {
-    Print (L"LocateProtocol failed: %r\n", Status);
-    return Status;
-  }
-
-  Status = Debug->SendDebugMessage (
-                    Debug,
-                    L"Hello from UagentDebugTest"
-                    );
-  Print (L"SendDebugMessage returned: %r\n", Status);
-  return Status;
-}
-```
-
-When adapting this template, prefer a distinctive remote message like:
-
-```c
-Status = Debug->SendDebugMessage (
-                  Debug,
-                  L"[UagentDebugTest] start"
-                  );
-```
-
-and send a matching completion line before returning success.
-
-## `.inf` Requirements
-
-Each module `.inf` should declare:
-
-- `MODULE_TYPE = UEFI_APPLICATION`
-- `ENTRY_POINT = UefiMain`
-- the source `.c` file
-- package dependency on `MdePkg/MdePkg.dec`
-
-It should link these library classes unless the module has a clear reason not to:
-
-- `UefiApplicationEntryPoint`
-- `UefiBootServicesTableLib`
-- `UefiLib`
-
-## `.dsc` Requirements
-
-The package `.dsc` must:
-
-- define a valid EDK2 platform
-- include `MdePkg/MdePkg.dec
-- provide the standard UEFI library implementations needed by the .inf
-- list each EFI app under [Components]
-
-If a new module is added and not listed in `[Components]`, the build will not include it.
-
-# Build And Environment
+## Build And EDK2 Environment
 
 This repo is not the EDK2 workspace root.
 
@@ -225,295 +171,111 @@ The EDK2 workspace used in this environment is:
 - `EDK_TOOLS_PATH=/home/alexa/Documents/SanderStuff/aau/cyber2/edk2/BaseTools`
 - `CONF_PATH=/home/alexa/Documents/SanderStuff/aau/cyber2/edk2/Conf`
 
-The repo root for these packages is:
-
-- `/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/uagent`
-
-The most important rule for building from this repo is:
-
-- `PACKAGES_PATH` must point at `/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/uagent`
-
-Without that, EDK2 may resolve package paths against the main workspace and build the wrong files or fail to find local ones.
-
-If `build` is not available in the shell yet, initialize EDK2 first:
+In a fresh shell, `build` may not exist until EDK2 setup is sourced:
 
 ```sh
 cd /home/alexa/Documents/SanderStuff/aau/cyber2/edk2
 source edksetup.sh
 ```
 
-There is no repo-local helper script that should be relied on here.
+Packages from this repo should be built with `PACKAGES_PATH` pointing at:
 
-## `userve` Control Tooling
+- `/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/uagent`
 
-The `ucli` binary for agent use is located at:
-
-- `/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve/bin/ucli`
-
-The source for that tool is located at:
-
-- `/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve/cmd/ucli/main.go`
-
-Typical commands:
-
-```sh
-/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve/bin/ucli status
-/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve/bin/ucli push /absolute/path/to/App.efi
-/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve/bin/ucli run
-/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve/bin/ucli outputs
-```
-
-Notes for agents:
-
-- `ucli push` accepts a path to a local file and uploads the basename to the remote side
-- `ucli run` triggers execution of the selected app on the connected target
-- `ucli send "<text>"` exists for raw text commands, but normal EFI app deploy/run work should use `push` and `run`
-- `ucli outputs` is the quickest way to inspect server-visible output after a run
-- if `ucli status` reports `connected=false`, the target is not connected and deployment cannot proceed
-- if `ucli` returns an error about no connected system, stop and report that state instead of inventing a fallback transport
-
-The correct build pattern is to set `PACKAGES_PATH` inline for the build command:
+The correct build pattern is:
 
 ```sh
 PACKAGES_PATH=/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/uagent build ...
 ```
 
-## Build Recipe
+Do not assume relative package paths will resolve correctly unless
+`PACKAGES_PATH` is set.
 
-Build the existing debug test app with:
+When the agent creates a new EFI probe, it should:
+
+1. place the probe under `UagentDeploymentPkg`
+2. add the probe module to `UagentDeploymentPkg/UagentDeploymentPkg.dsc`
+3. give the probe a valid `.inf`
+4. build it through the EDK2 `build` command with `PACKAGES_PATH` set
+5. verify that the expected `.efi` output exists before deployment
+
+The deployment package currently builds from:
+
+- `/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/uagent/UagentDeploymentPkg/UagentDeploymentPkg.dsc`
+
+The expected output directory is:
+
+- `/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/uagent/builds/UagentDeploymentPkg/DEBUG_GCC5/X64/`
+
+Example build shape for deployment probes:
 
 ```sh
 PACKAGES_PATH=/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/uagent build \
-  -p /home/alexa/Documents/SanderStuff/AID-BUN/ugentic/uagent/UagentPrintTcpExPkg/UagentDebugTestPkg.dsc \
-  -m UagentPrintTcpExPkg/UagentDebugTest.inf \
+  -p /home/alexa/Documents/SanderStuff/AID-BUN/ugentic/uagent/UagentDeploymentPkg/UagentDeploymentPkg.dsc \
+  -m /home/alexa/Documents/SanderStuff/AID-BUN/ugentic/uagent/UagentDeploymentPkg/<ProbeDir>/<ProbeName>.inf \
   -a X64 -b DEBUG -t GCC5
 ```
 
-Build the main `Uagent` app with:
+Do not place new runtime probes in unrelated packages unless the task
+explicitly requires a different package boundary.
 
-```sh
-PACKAGES_PATH=/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/uagent build \
-  -p /home/alexa/Documents/SanderStuff/AID-BUN/ugentic/uagent/UagentPkg/UagentPkg.dsc \
-  -m UagentPkg/Uagent.inf \
-  -a X64 -b DEBUG -t GCC5
-```
+If EDK2 prints a final warning about copying `*.pdb` files, that warning is
+harmless if the `.efi` file exists.
 
-Expected output locations:
+## Operational Constraints
 
-- `uagent/builds/UagentDebugTestPkg/DEBUG_GCC5/X64/UagentDebugTest.efi`
-- `uagent/builds/UagentPkg/DEBUG_GCC5/X64/Uagent.efi`
+The `userve` tooling is split into:
 
-## Deploy And Run Recipe
+- `userve/bin/userver`
+- `userve/bin/ucli`
 
-After building an EFI app, the expected deploy/run flow is:
+Important runtime rules:
 
-```sh
-/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve/bin/ucli push \
-  /home/alexa/Documents/SanderStuff/AID-BUN/ugentic/uagent/builds/UagentDebugTestPkg/DEBUG_GCC5/X64/UagentDebugTest.efi
+- the human operator starts and owns `userver`
+- the coding agent must not start, restart, or manage `userver`
+- the coding agent should assume `userver` is already running when deploy/run
+  work is requested
+- the coding agent should use `ucli` to interact with the already-running
+  `userver`
 
-/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve/bin/ucli run
+The agent-side control path is:
 
-/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve/bin/ucli outputs
-```
+1. build or update the EFI probe
+2. upload the built `.efi` with `ucli push`
+3. ask the target to execute it with `ucli run`
+4. inspect server-visible output with `ucli outputs` or `ucli status`
 
-Use the matching built `.efi` path for whatever module was requested.
+The agent must not:
 
-Important detail:
+- invent a new transport
+- replace the `Uagent` runtime path with a custom uploader or control path
+- treat local `Print()` output as proof of target interaction
 
-- these packages are configured to write build products into the shared `uagent/builds/` directory, not into EDK2's default `Build/` folder
+## Remote Output Rule
 
-If a package builds successfully on Linux, EDK2 may still print a final warning about copying `*.pdb` files. That warning is harmless if the `.efi` file exists.
+UEFI console output is not server output.
 
-Expected behavior:
+These are local-only:
 
-- local EFI console shows `SendDebugMessage returned: Success`
-- Go server shows the remote text
-- remote text may include Unicode-capable `SendDebugMessage()` content, not just short ASCII strings
+- `Print()`
+- `DEBUG()`
 
-## `userve` Workflow
+If text must be visible remotely, the probe must use the runtime-visible path
+provided by the existing environment.
 
-When an agent needs to deploy and run a newly built EFI against the active remote `Uagent` session, use the `userve` server that is part of this repo.
-
-The server project lives at:
-
-- `/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve`
-
-Build it with:
-
-```sh
-cd /home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve
-make
-```
-
-That produces:
-
-- `/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve/bin/userver`
-- `/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve/bin/ucli`
-
-The human operator is responsible for starting `userver`.
-
-If the user explicitly asks how the operator should run it, the command is:
-
-```sh
-cd /home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve
-./bin/userver
-```
-
-Agents must not rely on an interactive `userve>` prompt. That shell no longer exists.
-
-For agent-controlled deployment and execution, use:
-
-- `/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve/bin/ucli status`
-- `/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve/bin/ucli push /full/path/to/file.efi`
-- `/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve/bin/ucli run`
-- `/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve/bin/ucli outputs`
-- `/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve/bin/ucli send "text"`
-- `/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve/bin/ucli disconnect`
-
-Do not invent a second uploader or control path when `userve` already supports `push` and `run`.
-
-Do not stop at "the EFI built successfully" or "the local console printed success". The agent must verify the remote side when the task is about server-visible output.
-
-## Deployment Commands
-
-From `/home/alexa/Documents/SanderStuff/AID-BUN/ugentic/userve`, the standard remote deployment flow is:
-
-1. Assume the operator already started `./bin/userver`.
-
-2. Wait for the remote `Uagent` client to connect. The server will print:
-
-- `System connected from ...`
-- `Session ready: ...`
-
-3. Push the built EFI with `ucli`:
-
-`./bin/ucli push /full/path/to/<ModuleName>.efi`
-
-4. Execute the uploaded EFI:
-
-`./bin/ucli run`
-
-5. Inspect remote output with:
-
-`./bin/ucli outputs`
-
-Important behavioral rules:
-
-- this `userve` implementation supports one active session, not a multi-target selector
-- `push` sends the file basename to the remote side, so the `.efi` filename matters
-- `run` executes the currently uploaded EFI on the active remote connection
-- `ucli send "<text>"` sends ASCII text to the remote client
-- remote text from EFI is available through `ucli outputs` and is also printed by `userver`
-- if the task is to send text to the server, the agent should expect to see a distinctive remote marker line during `run`
-- if no distinctive remote marker exists in the EFI code yet, the agent should add one
-
-## Remote Execution Contract
-
-The expected remote text path is:
-
-1. the EFI app calls `SendDebugMessage()`
-2. `UagentPkg` converts that into `TcpOutputText`
-3. for `TcpConnectSession` and `TcpOutputText`, `UagentPkg` sends the text payload as raw `CHAR16` bytes
-4. `userve` decodes the payload and exposes it through `ucli outputs` and the running `userver` log
-
-This means:
-
-- `Print()` is for the local EFI console
-- `SendDebugMessage()` is for the remote Go server
-- `SendDebugMessage()` is no longer limited by the old fixed ASCII payload path used for local control text commands
-
-If the user asks the agent to "deploy the EFI", "send it to the server", "run it remotely", or "test it through Uagent", the agent should assume the correct path is:
-
-1. build the `.efi`
-2. assume `./bin/userver` is already running
-3. use `./bin/ucli push /full/path/to/file.efi`
-4. use `./bin/ucli run`
-5. verify that remote output contains the expected distinctive `SendDebugMessage()` text
-
-If the task is specifically about proving that output reached the server, the EFI should emit:
-
-- a clear start message
-- the main remote payload message or messages
-- a clear completion or success message
-
-## Common Failure Modes
-
-`LocateProtocol failed`
-
-- `Uagent.efi` is not running
-- the protocol was not installed
-- the session ended before the test app was launched
-
-`SendDebugMessage returned: Not Ready`
-
-- the debug protocol exists, but `UagentPkg` does not currently have an active TCP client
-
-Message appears locally but not on server
-
-- the app used `Print()` only
-- the app never called `SendDebugMessage()`
-- the app called `SendDebugMessage()` but did not emit any distinctive remote marker, so the operator could not tell what was sent
-
-Build succeeds but `.efi` is missing
-
-- wrong `.dsc`
-- component missing from `[Components]`
-- wrong `.inf` path in build command
-
-`./bin/userver` shows no connection
-
-- the local `userve` server may not be running
-- the remote `Uagent` client may not be connected
-
-`push ...` fails
-
-- the `.efi` path is wrong
-- no remote client is connected
-
-`run` produces no useful remote output
-
-- the uploaded EFI may only be using `Print()`
-- the app may not be locating `UAGENT_DEBUG_PROTOCOL`
-- the remote session may no longer be active
-- the app may be sending remote text, but not with a recognizable start or completion marker
-- the payload may not be readable text
-
-## Agent Decision Rules
-
-When the user asks for remote-visible text:
-
-- use `SendDebugMessage()`
-
-When the user asks for local operator feedback:
-
-- use `Print()`
-
-When the user asks for both:
-
-- use both, for different audiences
-
-When the user asks to "make an EDK app that prints to the server":
-
-- create a UEFI application in this package
-- consume `UAGENT_DEBUG_PROTOCOL`
-- send the text through `SendDebugMessage()`
-- include a distinctive remote start or completion marker
-- make sure `.inf` and `.dsc` are correct
-
-When the user asks to deploy or run the built EFI remotely:
-
-- run `./bin/userver`
-- use `push /full/path/to/file.efi`
-- use `run`
-- confirm that the expected remote marker text actually appeared on the server
+Probe output should include distinctive markers so the operator can identify
+which probe ran and what stage it reached.
 
 ## Default Success Criteria
 
-A change in this package is successful when:
+A runtime experiment is successful when:
 
-- the module builds as a UEFI application
-- it can locate `UAGENT_DEBUG_PROTOCOL`
-- it calls `SendDebugMessage()` successfully
-- the message becomes visible on the Go server
-- the agent can deploy and run the resulting `.efi` through `userve` when the task requires remote execution
-- the remote output is distinctive enough for an operator to verify that the correct EFI actually ran
+- the probe builds as a UEFI application
+- it is deployed through the existing `Uagent` workflow
+- it produces clear remote-visible markers
+- it confirms or rejects a concrete runtime hypothesis
+- the result narrows the next probe design
+
+The primary success condition is meaningful runtime interaction and semantic
+discovery through experimentation.
+
