@@ -295,11 +295,26 @@ RunRemoteSession (
     return Status;
   }
 
-  Outgoing.Type = TcpConnectSession;
-  Outgoing.Text = L"Uagent remote session ready";
-  Outgoing.Payload = NULL;
-  Outgoing.PayloadSize = 0;
+  UINTN         PayloadSize;
+  CHAR8         *AsciiPayload;
+  CONST CHAR16  *ConnectMessage = L"Uagent remote session ready";
+
+  PayloadSize = StrLen(ConnectMessage);
+  AsciiPayload = AllocateZeroPool (PayloadSize + 1);
+  if (AsciiPayload == NULL) {
+    UninstallUagentDebugProtocol ();
+    SetUagentActiveClient (NULL);
+    CloseSocketClient (&Client);
+    return EFI_OUT_OF_RESOURCES;
+  }
+  UnicodeStrToAsciiStrS (ConnectMessage, AsciiPayload, PayloadSize + 1);
+
+  Outgoing.Type        = TcpConnectSession;
+  Outgoing.Payload     = AsciiPayload;
+  Outgoing.PayloadSize = PayloadSize;
   Status        = SendCommandPacket (&Client, &Outgoing);
+  FreePool (AsciiPayload);
+
   if (EFI_ERROR (Status)) {
     UninstallUagentDebugProtocol ();
     SetUagentActiveClient (NULL);
@@ -321,33 +336,50 @@ RunRemoteSession (
     Response   = NULL;
     Disconnect = FALSE;
 
-  if (Incoming.Type == TcpDisconnectSession) {
+    CHAR16 *IncomingText = NULL;
+    if (Incoming.Payload != NULL && Incoming.PayloadSize > 0) {
+      IncomingText = AllocateZeroPool ((Incoming.PayloadSize + 1) * sizeof (CHAR16));
+      if (IncomingText != NULL) {
+        AsciiStrToUnicodeStrS ((CHAR8 *)Incoming.Payload, IncomingText, Incoming.PayloadSize + 1);
+      }
+    }
+
+    if (Incoming.Type == TcpDisconnectSession) {
       Disconnect = TRUE;
       Status     = DuplicateResponse (L"Server requested disconnect\n", &Response);
     } else if (Incoming.Type == TcpGetApps) {
       Status = DuplicateResponse (L"No local app registry implemented\n", &Response);
     } else if (Incoming.Type == TcpEchoText) {
-      if ((Incoming.Text == NULL) || (StrLen (Incoming.Text) == 0)) {
+      if ((IncomingText == NULL) || (StrLen (IncomingText) == 0)) {
         Status = DuplicateResponse (L"\n", &Response);
       } else {
-        Status = DuplicateResponse (Incoming.Text, &Response);
+        Status = DuplicateResponse (IncomingText, &Response);
       }
     } else if (Incoming.Type == TcpPushEfiApp) {
       Status = UploadEfiApp (&Incoming, &Response);
     } else if (Incoming.Type == TcpExecuteEfiApp) {
       Status = ExecuteUploadedEfiApp (ImageHandle, &Response);
     } else if (Incoming.Type == TcpSendText) {
-      Status = ExecuteRemoteInstruction (Incoming.Text, &Response, &Disconnect);
+      Status = ExecuteRemoteInstruction (IncomingText, &Response, &Disconnect);
     } else {
       Status = DuplicateResponse (L"Unsupported remote command type\n", &Response);
     }
 
+    if (IncomingText != NULL) {
+      FreePool (IncomingText);
+    }
+
     if (!EFI_ERROR (Status) && (Response != NULL)) {
-      Outgoing.Type = TcpOutputText;
-      Outgoing.Text = Response;
-      Outgoing.Payload = NULL;
-      Outgoing.PayloadSize = 0;
-      Status        = SendCommandPacket (&Client, &Outgoing);
+      PayloadSize = StrLen(Response);
+      AsciiPayload = AllocateZeroPool (PayloadSize + 1);
+      if (AsciiPayload != NULL) {
+        UnicodeStrToAsciiStrS (Response, AsciiPayload, PayloadSize + 1);
+        Outgoing.Type        = TcpOutputText;
+        Outgoing.Payload     = AsciiPayload;
+        Outgoing.PayloadSize = PayloadSize;
+        Status               = SendCommandPacket (&Client, &Outgoing);
+        FreePool (AsciiPayload);
+      }
     }
 
     if (Response != NULL) {

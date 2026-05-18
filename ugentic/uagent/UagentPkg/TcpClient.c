@@ -6,6 +6,7 @@ typedef struct {
   EFI_IPv4_ADDRESS      StationAddress;
   EFI_IPv4_ADDRESS      SubnetMask;
   EFI_IPv4_ADDRESS      DhcpServerAddress;
+  EFI_IPv4_ADDRESS      RemoteAddress;
 } NETWORK_STATUS;
 
 STATIC NETWORK_STATUS  mLastNetworkStatus;
@@ -48,7 +49,8 @@ UpdateLastNetworkStatus (
   IN SOCKET_CONFIG_SOURCE         ConfigSource,
   IN CONST EFI_IPv4_ADDRESS       *StationAddress OPTIONAL,
   IN CONST EFI_IPv4_ADDRESS       *SubnetMask OPTIONAL,
-  IN CONST EFI_IPv4_ADDRESS       *DhcpServerAddress OPTIONAL
+  IN CONST EFI_IPv4_ADDRESS       *DhcpServerAddress OPTIONAL,
+  IN CONST EFI_IPv4_ADDRESS       *RemoteAddress OPTIONAL
   )
 {
   mLastNetworkStatus.SelectedHandle = SelectedHandle;
@@ -71,6 +73,12 @@ UpdateLastNetworkStatus (
   } else {
     ZeroMem (&mLastNetworkStatus.DhcpServerAddress, sizeof (EFI_IPv4_ADDRESS));
   }
+
+  if (RemoteAddress != NULL) {
+    CopyMem (&mLastNetworkStatus.RemoteAddress, RemoteAddress, sizeof (EFI_IPv4_ADDRESS));
+  } else {
+    ZeroMem (&mLastNetworkStatus.RemoteAddress, sizeof (EFI_IPv4_ADDRESS));
+  }
 }
 
 STATIC
@@ -82,8 +90,8 @@ GetConfigSourceText (
   switch (ConfigSource) {
     case SocketConfigSourcePxe:
       return L"pxe";
-    case SocketConfigSourceDhcpFallback:
-      return L"dhcp-fallback";
+    case SocketConfigSourceIpv4:
+      return L"ipv4-config";
     default:
       return L"unknown";
   }
@@ -113,6 +121,27 @@ PrintIpv4Field (
     Address->Addr[2],
     Address->Addr[3]
     );
+}
+
+STATIC
+EFI_STATUS
+DeriveRemoteAddress (
+  IN  CONST EFI_IPv4_ADDRESS  *StationAddress,
+  OUT EFI_IPv4_ADDRESS        *RemoteAddress
+  )
+{
+  if ((StationAddress == NULL) || (RemoteAddress == NULL)) {
+    return EFI_INVALID_PARAMETER;
+  }
+
+  if (IsZeroIpv4Address (StationAddress)) {
+    ZeroMem (RemoteAddress, sizeof (*RemoteAddress));
+    return EFI_NOT_FOUND;
+  }
+
+  CopyMem (RemoteAddress, StationAddress, sizeof (*RemoteAddress));
+  RemoteAddress->Addr[3] = 1;
+  return EFI_SUCCESS;
 }
 
 STATIC
@@ -213,6 +242,11 @@ ConfigureTcp4Client (
   CopyMem (&Client->StationAddress, StationAddress, sizeof (Client->StationAddress));
   CopyMem (&Client->SubnetMask, SubnetMask, sizeof (Client->SubnetMask));
   CopyMem (&Client->DhcpServerAddress, DhcpServerAddress, sizeof (Client->DhcpServerAddress));
+  Status = DeriveRemoteAddress (StationAddress, &Client->RemoteAddress);
+  if (EFI_ERROR (Status)) {
+    Print (L"InitSocketClient: Failed to derive remote IPv4 from local address\n");
+    goto Error;
+  }
 
   Status = gBS->OpenProtocol (
                   Client->ServiceHandle,
@@ -266,16 +300,12 @@ ConfigureTcp4Client (
     goto Error;
   }
 
-  ZeroMem (&RemoteAddress, sizeof (RemoteAddress));
   ZeroMem (&ConfigData, sizeof (ConfigData));
-  RemoteAddress.Addr[0] = 192;
-  RemoteAddress.Addr[1] = 168;
-  RemoteAddress.Addr[2] = 122;
-  RemoteAddress.Addr[3] = 1;
+  CopyMem (&RemoteAddress, &Client->RemoteAddress, sizeof (RemoteAddress));
 
   ConfigData.TypeOfService                 = 0;
   ConfigData.TimeToLive                    = 64;
-  ConfigData.AccessPoint.UseDefaultAddress = (BOOLEAN)(ConfigSource == SocketConfigSourceDhcpFallback);
+  ConfigData.AccessPoint.UseDefaultAddress = (BOOLEAN)(ConfigSource == SocketConfigSourceIpv4);
   ConfigData.AccessPoint.ActiveFlag        = TRUE;
   ConfigData.AccessPoint.StationPort       = 0;
   ConfigData.AccessPoint.RemotePort        = REMOTE_PORT;
@@ -298,8 +328,8 @@ ConfigureTcp4Client (
 
   Status = Client->Tcp4->Connect (Client->Tcp4, &Client->ConnectToken);
   if (EFI_ERROR (Status)) {
-    if (ConfigSource == SocketConfigSourceDhcpFallback) {
-      Print (L"TCP4 connect failed after DHCP\n");
+    if (ConfigSource == SocketConfigSourceIpv4) {
+      Print (L"TCP4 connect failed after IPv4 config\n");
     }
 
     Print (L"InitSocketClient: TCP4 connect start failed: %r\n", Status);
@@ -308,6 +338,14 @@ ConfigureTcp4Client (
 
   Status = WaitForTcp4Token (Client->Tcp4, &Client->ConnectToken.CompletionToken);
   if (!EFI_ERROR (Status)) {
+    UpdateLastNetworkStatus (
+      ControllerHandle,
+      ConfigSource,
+      StationAddress,
+      SubnetMask,
+      DhcpServerAddress,
+      &Client->RemoteAddress
+      );
     Print (
       L"Connected to server %d.%d.%d.%d:%d\n",
       RemoteAddress.Addr[0],
@@ -319,8 +357,8 @@ ConfigureTcp4Client (
     return Status;
   }
 
-  if (ConfigSource == SocketConfigSourceDhcpFallback) {
-    Print (L"TCP4 connect failed after DHCP\n");
+  if (ConfigSource == SocketConfigSourceIpv4) {
+    Print (L"TCP4 connect failed after IPv4 config\n");
   }
 
   Print (L"InitSocketClient: TCP4 connect completion failed: %r\n", Status);
@@ -358,17 +396,11 @@ InitSocketClient (
   ZeroMem (&StationAddress, sizeof (StationAddress));
   ZeroMem (&SubnetMask, sizeof (SubnetMask));
   ZeroMem (&DhcpServerAddress, sizeof (DhcpServerAddress));
-  UpdateLastNetworkStatus (NULL, SocketConfigSourceUnknown, NULL, NULL, NULL);
+  // setting alle to the right sise
+  UpdateLastNetworkStatus (NULL, SocketConfigSourceUnknown, NULL, NULL, NULL, NULL);
 
   Status = TryGetPxeConfig (ImageHandle, &ControllerHandle, &StationAddress, &SubnetMask, &DhcpServerAddress);
   if (!EFI_ERROR (Status)) {
-    UpdateLastNetworkStatus (
-      ControllerHandle,
-      SocketConfigSourcePxe,
-      &StationAddress,
-      &SubnetMask,
-      &DhcpServerAddress
-      );
     return ConfigureTcp4Client (
              ImageHandle,
              ControllerHandle,
@@ -390,8 +422,8 @@ InitSocketClient (
 
   for (CandidateIndex = 0; CandidateIndex < CandidateCount; CandidateIndex++) {
     ControllerHandle = CandidateHandles[CandidateIndex];
-    UpdateLastNetworkStatus (ControllerHandle, SocketConfigSourceDhcpFallback, NULL, NULL, NULL);
-    Status           = AcquireDhcpFallbackConfig (
+    UpdateLastNetworkStatus (ControllerHandle, SocketConfigSourceIpv4, NULL, NULL, NULL, NULL);
+    Status           = AcquireIpv4Config (
                          ImageHandle,
                          ControllerHandle,
                          &StationAddress,
@@ -403,18 +435,10 @@ InitSocketClient (
       continue;
     }
 
-    UpdateLastNetworkStatus (
-      ControllerHandle,
-      SocketConfigSourceDhcpFallback,
-      &StationAddress,
-      &SubnetMask,
-      &DhcpServerAddress
-      );
-
     Status = ConfigureTcp4Client (
                ImageHandle,
                ControllerHandle,
-               SocketConfigSourceDhcpFallback,
+               SocketConfigSourceIpv4,
                &StationAddress,
                &SubnetMask,
                &DhcpServerAddress,
@@ -442,8 +466,6 @@ SendCommandPacket (
   EFI_TCP4_TRANSMIT_DATA  *TransmitData;
   UINT8                   *PacketBuffer;
   UINTN                   AllocationSize;
-  UINTN                   PayloadLength;
-  VOID                    *PayloadBuffer;
 
   if ((Client == NULL) || (Client->Tcp4 == NULL) || (Command == NULL)) {
     return EFI_INVALID_PARAMETER;
@@ -453,60 +475,24 @@ SendCommandPacket (
     return EFI_INVALID_PARAMETER;
   }
 
-  PayloadLength = 0;
-  PayloadBuffer = NULL;
-  if (Command->Payload != NULL) {
-    PayloadLength = Command->PayloadSize;
-    PayloadBuffer = Command->Payload;
-  } else if (Command->Text != NULL) {
-    if ((Command->Type == TcpConnectSession) || (Command->Type == TcpOutputText)) {
-      PayloadLength = StrSize (Command->Text);
-      if (PayloadLength >= sizeof (CHAR16)) {
-        PayloadLength -= sizeof (CHAR16);
-      } else {
-        PayloadLength = 0;
-      }
-      PayloadBuffer = Command->Text;
-    } else {
-      CHAR8  *AsciiPayload;
-
-      PayloadLength = StrLen (Command->Text) + 1;
-      AsciiPayload  = AllocateZeroPool (PayloadLength);
-      if (AsciiPayload == NULL) {
-        return EFI_OUT_OF_RESOURCES;
-      }
-
-      Status = UnicodeStrToAsciiStrS (Command->Text, AsciiPayload, PayloadLength);
-      if (EFI_ERROR (Status)) {
-        FreePool (AsciiPayload);
-        return Status;
-      }
-
-      PayloadLength = AsciiStrLen (AsciiPayload);
-      PayloadBuffer = AsciiPayload;
-    }
-  }
-
-  AllocationSize = COMMAND_HEADER_SIZE + PayloadLength;
+  AllocationSize = COMMAND_HEADER_SIZE + Command->PayloadSize;
   PacketBuffer   = AllocateZeroPool (AllocationSize);
   TransmitData   = AllocateZeroPool (sizeof (EFI_TCP4_TRANSMIT_DATA));
   if ((PacketBuffer == NULL) || (TransmitData == NULL)) {
     if (PacketBuffer != NULL) {
       FreePool (PacketBuffer);
     }
-
     if (TransmitData != NULL) {
       FreePool (TransmitData);
     }
-
     return EFI_OUT_OF_RESOURCES;
   }
 
   PacketBuffer[0] = (UINT8)Command->Type;
-  PacketBuffer[1] = (UINT8)(PayloadLength & 0xFF);
-  PacketBuffer[2] = (UINT8)((PayloadLength >> 8) & 0xFF);
-  if (PayloadLength > 0) {
-    CopyMem (PacketBuffer + COMMAND_HEADER_SIZE, PayloadBuffer, PayloadLength);
+  PacketBuffer[1] = (UINT8)(Command->PayloadSize & 0xFF);
+  PacketBuffer[2] = (UINT8)((Command->PayloadSize >> 8) & 0xFF);
+  if (Command->PayloadSize > 0 && Command->Payload != NULL) {
+    CopyMem (PacketBuffer + COMMAND_HEADER_SIZE, Command->Payload, Command->PayloadSize);
   }
 
   TransmitData->Push                            = TRUE;
@@ -524,15 +510,6 @@ SendCommandPacket (
   Status = Client->Tcp4->Transmit (Client->Tcp4, &Client->TransmitToken);
   if (!EFI_ERROR (Status)) {
     Status = WaitForTcp4Token (Client->Tcp4, &Client->TransmitToken.CompletionToken);
-  }
-
-  if ((Command->Payload == NULL) &&
-      (Command->Text != NULL) &&
-      (Command->Type != TcpConnectSession) &&
-      (Command->Type != TcpOutputText) &&
-      (PayloadBuffer != NULL))
-  {
-    FreePool (PayloadBuffer);
   }
 
   FreePool (PacketBuffer);
@@ -651,8 +628,6 @@ ReceiveCommandPacket (
   EFI_STATUS  Status;
   UINT8       Header[COMMAND_HEADER_SIZE];
   UINT16      PayloadLength;
-  CHAR8       *AsciiPayload;
-  BOOLEAN     TextPayload;
 
   if ((Client == NULL) || (Command == NULL)) {
     return EFI_INVALID_PARAMETER;
@@ -673,50 +648,15 @@ ReceiveCommandPacket (
     return EFI_SUCCESS;
   }
 
-  AsciiPayload = AllocateZeroPool ((UINTN)PayloadLength + 1);
-  if (AsciiPayload == NULL) {
-    Print (L"Failed to allocate memory for payload\n");
-    return EFI_OUT_OF_RESOURCES;
-  }
-
-  Status = ReceiveExactBytes (Client, (UINT8 *)AsciiPayload, PayloadLength);
-  if (EFI_ERROR (Status)) {
-    Print (L"Failed to receive payload data\n");
-    FreePool (AsciiPayload);
-    return Status;
-  }
-
-  Command->Payload = AllocateCopyPool ((UINTN)PayloadLength, AsciiPayload);
+  Command->Payload = AllocateZeroPool ((UINTN)PayloadLength + 1); // +1 for null termination safety
   if (Command->Payload == NULL) {
     Print (L"Failed to allocate memory for command payload\n");
-    FreePool (AsciiPayload);
     return EFI_OUT_OF_RESOURCES;
   }
 
-  TextPayload = (BOOLEAN)(
-                  (Command->Type == TcpSendText) ||
-                  (Command->Type == TcpEchoText) ||
-                  (Command->Type == TcpConnectSession) ||
-                  (Command->Type == TcpOutputText)
-                  );
-  if (!TextPayload) {
-    FreePool (AsciiPayload);
-    return EFI_SUCCESS;
-  }
-
-  Command->Text = AllocateZeroPool (((UINTN)PayloadLength + 1) * sizeof (CHAR16));
-  if (Command->Text == NULL) {
-    Print (L"Failed to allocate memory for command text\n");
-    FreePool (AsciiPayload);
-    FreePool (Command->Payload);
-    Command->Payload = NULL;
-    return EFI_OUT_OF_RESOURCES;
-  }
-
-  Status = AsciiStrToUnicodeStrS (AsciiPayload, Command->Text, (UINTN)PayloadLength + 1);
-  FreePool (AsciiPayload);
+  Status = ReceiveExactBytes (Client, (UINT8 *)Command->Payload, PayloadLength);
   if (EFI_ERROR (Status)) {
-    Print (L"Failed to convert payload to Unicode string\n");
+    Print (L"Failed to receive payload data\n");
     FreeCommandPacket (Command);
     return Status;
   }
@@ -733,89 +673,12 @@ FreeCommandPacket (
     return;
   }
 
-  if (Command->Text != NULL) {
-    FreePool (Command->Text);
-    Command->Text = NULL;
-  }
-
   if (Command->Payload != NULL) {
     FreePool (Command->Payload);
     Command->Payload = NULL;
   }
 
   Command->PayloadSize = 0;
-}
-
-EFI_STATUS
-ReceiveAndPrintResponse (
-  IN SOCKET_CLIENT  *Client
-  )
-{
-  EFI_STATUS             Status;
-  EFI_TCP4_RECEIVE_DATA  *ReceiveData;
-  CHAR8                  *ResponseBuffer;
-  UINTN                  AllocationSize;
-
-  if ((Client == NULL) || (Client->Tcp4 == NULL)) {
-    return EFI_INVALID_PARAMETER;
-  }
-
-  AllocationSize = sizeof (EFI_TCP4_RECEIVE_DATA) + sizeof (EFI_TCP4_FRAGMENT_DATA) * 0;
-  ReceiveData    = AllocateZeroPool (AllocationSize);
-  ResponseBuffer = AllocateZeroPool (RESPONSE_CHUNK_SIZE + 1);
-  if ((ReceiveData == NULL) || (ResponseBuffer == NULL)) {
-    if (ReceiveData != NULL) {
-      FreePool (ReceiveData);
-    }
-
-    if (ResponseBuffer != NULL) {
-      FreePool (ResponseBuffer);
-    }
-
-    return EFI_OUT_OF_RESOURCES;
-  }
-
-  while (TRUE) {
-    ZeroMem (ReceiveData, AllocationSize);
-    ZeroMem (ResponseBuffer, RESPONSE_CHUNK_SIZE + 1);
-
-    ReceiveData->UrgentFlag                      = FALSE;
-    ReceiveData->DataLength                      = RESPONSE_CHUNK_SIZE;
-    ReceiveData->FragmentCount                   = 1;
-    ReceiveData->FragmentTable[0].FragmentLength = RESPONSE_CHUNK_SIZE;
-    ReceiveData->FragmentTable[0].FragmentBuffer = ResponseBuffer;
-
-    ZeroMem (&Client->ReceiveToken, sizeof (Client->ReceiveToken));
-    Client->ReceiveToken.CompletionToken.Event  = Client->ReceiveEvent;
-    Client->ReceiveToken.CompletionToken.Status = EFI_NOT_READY;
-    Client->ReceiveToken.Packet.RxData          = ReceiveData;
-
-    Status = Client->Tcp4->Receive (Client->Tcp4, &Client->ReceiveToken);
-    if (EFI_ERROR (Status)) {
-      break;
-    }
-
-    Status = WaitForTcp4Token (Client->Tcp4, &Client->ReceiveToken.CompletionToken);
-    if (Status == EFI_CONNECTION_FIN) {
-      Status = EFI_SUCCESS;
-      break;
-    }
-
-    if (EFI_ERROR (Status)) {
-      break;
-    }
-
-    ResponseBuffer[ReceiveData->DataLength] = '\0';
-    Print (L"%a", ResponseBuffer);
-
-    if (ReceiveData->DataLength < RESPONSE_CHUNK_SIZE) {
-      break;
-    }
-  }
-
-  FreePool (ResponseBuffer);
-  FreePool (ReceiveData);
-  return Status;
 }
 
 VOID
@@ -873,6 +736,7 @@ PrintLastNetworkStatus (
   PrintIpv4Field (L"  local IPv4", &mLastNetworkStatus.StationAddress);
   PrintIpv4Field (L"  subnet mask", &mLastNetworkStatus.SubnetMask);
   PrintIpv4Field (L"  DHCP server", &mLastNetworkStatus.DhcpServerAddress);
+  PrintIpv4Field (L"  remote server", &mLastNetworkStatus.RemoteAddress);
 }
 
 VOID
@@ -882,4 +746,5 @@ PrintIpStatus (
 {
   PrintIpv4Field (L"IPv4", &mLastNetworkStatus.StationAddress);
   PrintIpv4Field (L"DHCP server", &mLastNetworkStatus.DhcpServerAddress);
+  PrintIpv4Field (L"Remote server", &mLastNetworkStatus.RemoteAddress);
 }

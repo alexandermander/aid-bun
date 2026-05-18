@@ -36,11 +36,11 @@ func handleConnection(conn net.Conn, sessions *session.Manager) {
 
 		switch pkt.Command {
 		case protocol.CmdConnectSession:
-			msg := protocol.DecodeUTF16(pkt.Payload)
+			msg := string(pkt.Payload)
 			sessions.MarkReady(msg)
 			fmt.Printf("[+] Session ready: %s\n", msg)
 		case protocol.CmdOutputText:
-			text := protocol.DecodeUTF16(pkt.Payload)
+			text := string(pkt.Payload)
 			sessions.AddOutput(text)
 			fmt.Printf("[OUTPUT] %s\n", text)
 		case protocol.CmdDisconnectSession:

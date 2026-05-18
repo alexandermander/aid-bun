@@ -1,6 +1,6 @@
 # UagentPkg
 
-`UagentPkg` is a small EDK2 UEFI application intended to start after PXE boot, prefer PXE-derived IPv4 configuration when present, fall back to an already-configured IPv4 interface when PXE state is unavailable, connect to a fixed server on TCP port `8080`, and provide a server-driven remote-control session.
+`UagentPkg` is a small EDK2 UEFI application intended to start after PXE boot, prefer PXE-derived IPv4 configuration when present, fall back to an already-configured IPv4 interface when PXE state is unavailable, derive the remote server IP from the acquired local IPv4 address by replacing the last octet with `1`, connect on TCP port `8080`, and provide a server-driven remote-control session.
 
 ## Current layout
 
@@ -62,7 +62,7 @@ The generated EFI binary is written to:
 
 ## Notes
 
-- The remote server address is currently hard-coded in `TcpClient.c` as `192.168.70.1:8080`.
+- The remote server address is derived from the acquired local IPv4 address. Example: `192.168.2.17` becomes `192.168.2.1:8080`.
 - Connection order is `PXE first, existing IPv4 second`.
 - If PXE DHCP state is unavailable, the application scans for the first handle that exposes both `EFI_TCP4_SERVICE_BINDING_PROTOCOL` and `EFI_IP4_CONFIG2_PROTOCOL`, and uses that NIC only when firmware already reports a non-zero station address and subnet mask.
 - Binary requests use the packet format `[command:1][payload_length:2][payload:N]`.
@@ -79,6 +79,5 @@ The generated EFI binary is written to:
   - `8 = TcpEchoText`
 - The current `Shell.c` remote dispatcher actively handles `TcpSendText`, `TcpGetApps`, `TcpDisconnectSession`, `TcpEchoText`, `TcpPushEfiApp`, and `TcpExecuteEfiApp`.
 - Uploaded EFI binaries are kept in memory for the duration of the remote session and executed with `LoadImage()` and `StartImage()`.
-
 
 

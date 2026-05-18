@@ -9,24 +9,21 @@
 #include <Library/UefiBootServicesTableLib.h>
 #include <Library/UefiLib.h>
 #include <Library/UefiRuntimeServicesTableLib.h>
-#include <Protocol/Dhcp4.h>
 #include <Protocol/LoadedImage.h>
 #include <Protocol/Ip4Config2.h>
 #include <Protocol/PxeBaseCode.h>
 #include <Protocol/ServiceBinding.h>
 #include <Protocol/Tcp4.h>
 
-#define UAGENT_VERSION         L"1.6.3"
+#define UAGENT_VERSION         L"1.6.4"
 #define REMOTE_PORT            8080
 #define COMMAND_BUF_SIZE       128
 #define RESPONSE_CHUNK_SIZE    512
 #define COMMAND_HEADER_SIZE    3
-#define DHCP_FALLBACK_TIMEOUT_SECONDS  15
-
 typedef enum {
   SocketConfigSourceUnknown = 0,
   SocketConfigSourcePxe,
-  SocketConfigSourceDhcpFallback
+  SocketConfigSourceIpv4
 } SOCKET_CONFIG_SOURCE;
 
 typedef struct {
@@ -49,6 +46,7 @@ typedef struct {
   EFI_IPv4_ADDRESS              StationAddress;
   EFI_IPv4_ADDRESS              SubnetMask;
   EFI_IPv4_ADDRESS              DhcpServerAddress;
+  EFI_IPv4_ADDRESS              RemoteAddress;
 } SOCKET_CLIENT;
 
 typedef enum {
@@ -65,7 +63,6 @@ typedef enum {
 
 typedef struct {
   COMMAND_TYPE  Type;
-  CHAR16        *Text;
   VOID          *Payload;
   UINTN         PayloadSize;
 } TCP_COMMAND;
@@ -111,7 +108,7 @@ TryGetPxeConfig (
   );
 
 EFI_STATUS
-AcquireDhcpFallbackConfig (
+AcquireIpv4Config (
   IN  EFI_HANDLE        ImageHandle,
   IN  EFI_HANDLE        ControllerHandle,
   OUT EFI_IPv4_ADDRESS  *StationAddress,
@@ -134,11 +131,6 @@ ReceiveCommandPacket (
 VOID
 FreeCommandPacket (
   IN OUT TCP_COMMAND  *Command
-  );
-
-EFI_STATUS
-ReceiveAndPrintResponse (
-  IN SOCKET_CLIENT  *Client
   );
 
 VOID

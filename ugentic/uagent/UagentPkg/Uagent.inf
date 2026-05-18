@@ -7,7 +7,7 @@
   ENTRY_POINT                    = UefiMain
 
 [Sources]
-  DhcpConfig.c
+  NetworkConfig.c
   Uagent.c
   Shell.c
   TcpClient.c

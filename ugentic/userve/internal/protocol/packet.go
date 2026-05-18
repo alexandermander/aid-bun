@@ -5,23 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"unicode/utf16"
-)
 
-func DecodeUTF16(data []byte) string {
-	if len(data) == 0 {
-		return ""
-	}
-	if len(data)%2 != 0 {
-		return string(data)
-	}
-
-	u16s := make([]uint16, len(data)/2)
-	for i := range u16s {
-		u16s[i] = binary.LittleEndian.Uint16(data[i*2 : i*2+2])
-	}
-	return string(utf16.Decode(u16s))
-}
 
 type Packet struct {
 	Command byte

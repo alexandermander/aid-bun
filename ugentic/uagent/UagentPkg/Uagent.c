@@ -10,11 +10,7 @@ STATIC EFI_HANDLE     mDebugProtocolHandle  = NULL;
 STATIC
 EFI_STATUS
 EFIAPI
-UagentSendDebugMessage (
-  IN UAGENT_DEBUG_PROTOCOL  *This,
-  IN CONST CHAR16           *Message
-  )
-{
+UagentSendDebugMessage ( IN UAGENT_DEBUG_PROTOCOL  *This,  CONST CHAR16           *Message) {
   EFI_STATUS   Status;
   TCP_COMMAND  Command;
 
@@ -26,12 +22,22 @@ UagentSendDebugMessage (
     return EFI_NOT_READY;
   }
 
+  CHAR8  *AsciiPayload;
+  UINTN  PayloadSize;
+
+  PayloadSize = StrLen(Message);
+  AsciiPayload = AllocateZeroPool (PayloadSize + 1);
+  if (AsciiPayload == NULL) {
+    return EFI_OUT_OF_RESOURCES;
+  }
+  UnicodeStrToAsciiStrS (Message, AsciiPayload, PayloadSize + 1);
+
   Command.Type        = TcpOutputText;
-  Command.Text        = (CHAR16 *)Message;
-  Command.Payload     = NULL;
-  Command.PayloadSize = 0;
+  Command.Payload     = AsciiPayload;
+  Command.PayloadSize = PayloadSize;
 
   Status = SendCommandPacket (mActiveClient, &Command);
+  FreePool (AsciiPayload);
   return Status;
 }
 
