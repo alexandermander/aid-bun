@@ -36,7 +36,7 @@ def collect_pe_files(
     extracted_root: Path,
     output_dir: Path,
     *,
-    min_size_bytes: int = 7 * 1024,
+    min_size_bytes: int = 5 * 1024,
 ) -> list[CollectedPeFile]:
     output_dir.mkdir(parents=True, exist_ok=True)
     collected: list[CollectedPeFile] = []

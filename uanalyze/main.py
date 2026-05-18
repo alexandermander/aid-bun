@@ -107,7 +107,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--min-pe-size",
         type=int,
-        default=8 * 1024,
+        default=7 * 1024,
         help="Minimum size in bytes for candidate body.bin files.",
     )
     parser.add_argument(
