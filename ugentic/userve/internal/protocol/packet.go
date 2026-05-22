@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-
+)
 
 type Packet struct {
 	Command byte

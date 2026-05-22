@@ -8,7 +8,7 @@ import (
 	"userve/internal/protocol"
 )
 
-const maxOutputLog = 200
+const maxOutputLog = 400
 
 type Status struct {
 	Connected      bool   `json:"connected"`

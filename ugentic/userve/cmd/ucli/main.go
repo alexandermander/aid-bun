@@ -56,16 +56,17 @@ func main() {
 func runStatus(ctx context.Context, client *control.Client) error {
 	status, err := client.Status(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("status failed: %w", err)
 	}
 	if !status.Connected {
 		fmt.Println("connected=false")
 		return nil
 	}
 
+	cleanMsg := strings.ReplaceAll(status.ConnectMessage, "\x00", "")
 	fmt.Printf("connected=true\naddress=%s\nready=%t\n", status.Address, status.Ready)
-	if status.ConnectMessage != "" {
-		fmt.Printf("connect_message=%s\n", status.ConnectMessage)
+	if cleanMsg != "" {
+		fmt.Printf("connect_message=%s\n", cleanMsg)
 	}
 	return nil
 }
@@ -85,10 +86,10 @@ func runOutputs(ctx context.Context, client *control.Client, args []string) erro
 
 	outputs, err := client.Outputs(ctx, limit)
 	if err != nil {
-		return err
+		return fmt.Errorf("outputs failed: %w", err)
 	}
 	for _, line := range outputs {
-		fmt.Println(line)
+		fmt.Println(strings.ReplaceAll(line, "\x00", ""))
 	}
 	return nil
 }
